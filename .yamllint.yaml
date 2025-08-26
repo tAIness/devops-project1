@@ -11,4 +11,5 @@ rules:
     level: warning
   indentation:
     indent-sequences: false
+    level: warning
   truthy: enable
