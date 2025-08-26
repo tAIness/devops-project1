@@ -22,7 +22,7 @@ services:
     ports:
     - "8080:80"
     volumes:
-      - ./content/images:/usr/share/nginx/html/images:rw
+    - ./content/images:/usr/share/nginx/html/images:rw
     depends_on:
     - service
     restart: unless-stopped
