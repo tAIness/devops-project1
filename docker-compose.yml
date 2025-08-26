@@ -26,4 +26,3 @@ services:
     depends_on:
       - service
     restart: unless-stopped
-
