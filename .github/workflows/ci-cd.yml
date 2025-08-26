@@ -56,7 +56,9 @@ jobs:
           strict: true
 
       - name: actionlint (GitHub Actions YAML)
-        uses: rhysd/actionlint@v1
+        uses: reviewdog/action-actionlint@v1
+        with:
+          fail_on_error: true
 
       - name: Validate docker-compose.yml
         run: docker compose -f docker-compose.yml config -q
