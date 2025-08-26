@@ -1,0 +1,28 @@
+services:
+  service:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    image: ${DOCKER_USER}/supermario-service:${TAG}
+    container_name: supermario-service
+    environment:
+      PORT: "8000"
+      APP_ENV: "production"
+      GUNICORN_WORKERS: "2"
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+
+  front:
+    build:
+      context: ./web
+      dockerfile: Dockerfile
+    image: ${DOCKER_USER}/supermario-front:${TAG}
+    container_name: supermario-front
+    ports:
+      - "8080:80"
+    volumes:
+      - ./content/images:/usr/share/nginx/html/images:rw
+    depends_on:
+      - service
+    restart: unless-stopped

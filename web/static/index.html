@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Super Mario — Static Site</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preload" href="/css/site.css" as="style" />
+  <link rel="stylesheet" href="/css/site.css" />
+</head>
+<body>
+  <header class="site-header">
+    <h1>Super Mario</h1>
+    <p>Click the card to play a Mario-style mini-game.</p>
+  </header>
+
+  <main class="grid">
+    <!-- Play card (unchanged) -->
+    <a class="card" href="/game/" title="Play the game">
+      <img src="/assets/hero/mario1.jpg" alt="Super Mario standing" />
+      <div class="card-title">Play Super Mario</div>
+    </a>
+
+    <!-- Gallery card now links to the images directory -->
+    <a class="card" href="/images/" title="Open the Mario gallery">
+      <img src="/assets/hero/mario2.jpg" alt="Mario jumping" />
+      <div class="card-title">Gallery</div>
+    </a>
+
+<!-- Nintendo Shop card (using mario3.jpg) -->
+<a class="card" href="https://www.nintendo.com/us/store/characters/mushroom-kingdom/"
+   title="Nintendo Shop — Mushroom Kingdom"
+   target="_blank" rel="noopener noreferrer">
+  <img src="/assets/hero/mario3.jpg" alt="Nintendo Shop — Mushroom Kingdom" />
+  <div class="card-title">Nintendo Shop →</div>
+</a>
+  </main>
+
+  <footer class="site-footer">
+    <small>Images are placeholders—use your own licensed artwork.</small>
+  </footer>
+</body>
+</html>
