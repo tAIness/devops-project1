@@ -24,29 +24,26 @@ env:
   PYTHON_VERSION: "3.11"
 
 jobs:
-  # ---------- Secrets preflight (fails early if missing) ----------
-  secrets-check:
+  # ---------- Secrets preflight (no expressions using secrets in if:) ----------
+  secrets-preflight:
     name: Secrets preflight
     runs-on: ubuntu-latest
     steps:
-      - name: Require DOCKERHUB_USERNAME
-        if: ${{ secrets.DOCKERHUB_USERNAME == '' }}
+      - name: Check required secrets
+        env:
+          DHU:  ${{ secrets.DOCKERHUB_USERNAME }}
+          DHT:  ${{ secrets.DOCKERHUB_TOKEN }}
+          SNYK: ${{ secrets.SNYK_TOKEN }}
         run: |
-          echo "::error::Missing secret DOCKERHUB_USERNAME"; exit 1
-      - name: Require DOCKERHUB_TOKEN
-        if: ${{ secrets.DOCKERHUB_TOKEN == '' }}
-        run: |
-          echo "::error::Missing secret DOCKERHUB_TOKEN"; exit 1
-      - name: Optional SNYK_TOKEN notice
-        if: ${{ secrets.SNYK_TOKEN == '' }}
-        run: |
-          echo "::notice::SNYK_TOKEN not set; security scans will be skipped."
+          if [ -z "$DHU" ]; then echo "::error::Missing secret DOCKERHUB_USERNAME"; exit 1; fi
+          if [ -z "$DHT" ]; then echo "::error::Missing secret DOCKERHUB_TOKEN"; exit 1; fi
+          if [ -z "$SNYK" ]; then echo "::notice::SNYK_TOKEN not set; security scans will be skipped."; fi
 
   # ---------- YAML & workflow verification ----------
   yaml-verify:
     name: YAML verify (yamllint, actionlint, compose config)
     runs-on: ubuntu-latest
-    needs: [ secrets-check ]
+    needs: [ secrets-preflight ]
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -59,7 +56,9 @@ jobs:
           strict: true
 
       - name: actionlint (GitHub Actions YAML)
-        uses: rhysd/actionlint@v1
+        uses: reviewdog/action-actionlint@v1
+        with:
+          fail_on_error: true
 
       - name: Validate docker-compose.yml
         run: docker compose -f docker-compose.yml config -q
@@ -274,6 +273,8 @@ jobs:
     name: Build/Push/Attest/SBOM
     runs-on: ubuntu-latest
     needs: [ smoke-test ]
+    # don't run on PRs (secrets are not available on forks)
+    if: ${{ github.event_name != 'pull_request' }}
     timeout-minutes: 40
     env:
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
@@ -291,9 +292,6 @@ jobs:
             image_suffix: supermario-front
     steps:
       - uses: actions/checkout@v4
-
-      - name: Compute DockerHub user env
-        run: echo "DOCKERHUB_USER=${{ secrets.DOCKERHUB_USERNAME || github.repository_owner }}" >> $GITHUB_ENV
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -320,7 +318,7 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ env.DOCKERHUB_USER }}/${{ matrix.image_suffix }}
+          images: ${{ env.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image_suffix }}
           tags: |
             type=ref,event=tag
             type=sha,format=short
@@ -353,7 +351,7 @@ jobs:
         id: digest
         run: |
           echo "digest=${{ steps.build.outputs.digest }}" >> $GITHUB_OUTPUT
-          echo "image=${{ env.REGISTRY }}/${{ env.DOCKERHUB_USER }}/${{ matrix.image_suffix }}" >> $GITHUB_OUTPUT
+          echo "image=${{ env.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image_suffix }}" >> $GITHUB_OUTPUT
 
       - name: Snyk scan (container image)
         if: env.SNYK_TOKEN != ''
