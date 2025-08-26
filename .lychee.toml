@@ -1,0 +1,4 @@
+exclude = ["https://www.nintendo.com/*"]
+max_retries = 2
+retry_wait_time = 2
+user_agent = "CI link checker (lychee)"

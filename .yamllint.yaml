@@ -1,0 +1,14 @@
+extends: default
+ignore: |
+  node_modules/*
+  content/images/*
+  web/game/assets/*
+  playwright-report/*
+  **/*.spdx.json
+rules:
+  line-length:
+    max: 140
+    level: warning
+  indentation:
+    indent-sequences: false
+  truthy: enable
