@@ -1,17 +1,18 @@
+---
 name: CI/CD
 
-on:
-  workflow_dispatch:
+"on":
+  workflow_dispatch: {}
   push:
-   branches:
-    - main
-    - master
-   tags:
-    - v*.*.*
+    branches:
+      - main
+      - master
+    tags:
+      - v*.*.*
   pull_request:
-   branches:
-    - main
-    - master
+    branches:
+      - main
+      - master
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -34,15 +35,16 @@ jobs:
     name: Secrets preflight
     runs-on: ubuntu-latest
     steps:
-    - name: Check required secrets
-  env:
-    DHU: ${{ secrets.DOCKERHUB_USERNAME }}
-    DHT: ${{ secrets.DOCKERHUB_TOKEN }}
-    SNYK: ${{ secrets.SNYK_TOKEN }}
-  run: |
-    if [-z "$DHU"]; then echo "::error::Missing secret DOCKERHUB_USERNAME"; exit 1; fi
-    if [-z "$DHT"]; then echo "::error::Missing secret DOCKERHUB_TOKEN"; exit 1; fi
-    if [-z "$SNYK"]; then echo "::notice::SNYK_TOKEN not set; security scans will be skipped."; fi
+      - name: Check required secrets
+        shell: bash
+        env:
+          DHU: ${{ secrets.DOCKERHUB_USERNAME }}
+          DHT: ${{ secrets.DOCKERHUB_TOKEN }}
+          SNYK: ${{ secrets.SNYK_TOKEN }}
+        run: |
+          if [ -z "$DHU" ]; then echo "::error::Missing secret DOCKERHUB_USERNAME"; exit 1; fi
+          if [ -z "$DHT" ]; then echo "::error::Missing secret DOCKERHUB_TOKEN"; exit 1; fi
+          if [ -z "$SNYK" ]; then echo "::notice::SNYK_TOKEN not set; security scans will be skipped."; fi
 
   # ---------- YAML & workflow verification ----------
   yaml-verify:
