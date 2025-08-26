@@ -22,14 +22,31 @@ permissions:
 env:
   REGISTRY: docker.io
   PYTHON_VERSION: "3.11"
-  # If you set a repo variable DOCKERHUB_USERNAME it will be used; else fallback to repo owner
-  DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME || github.repository_owner }}
 
 jobs:
+  # ---------- Secrets preflight (fails early if missing) ----------
+  secrets-check:
+    name: Secrets preflight
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require DOCKERHUB_USERNAME
+        if: ${{ secrets.DOCKERHUB_USERNAME == '' }}
+        run: |
+          echo "::error::Missing secret DOCKERHUB_USERNAME"; exit 1
+      - name: Require DOCKERHUB_TOKEN
+        if: ${{ secrets.DOCKERHUB_TOKEN == '' }}
+        run: |
+          echo "::error::Missing secret DOCKERHUB_TOKEN"; exit 1
+      - name: Optional SNYK_TOKEN notice
+        if: ${{ secrets.SNYK_TOKEN == '' }}
+        run: |
+          echo "::notice::SNYK_TOKEN not set; security scans will be skipped."
+
   # ---------- YAML & workflow verification ----------
   yaml-verify:
     name: YAML verify (yamllint, actionlint, compose config)
     runs-on: ubuntu-latest
+    needs: [ secrets-check ]
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v4
@@ -54,7 +71,7 @@ jobs:
     needs: [ yaml-verify ]
     timeout-minutes: 15
     env:
-      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}   # expose once; gate step with env below
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
     steps:
       - uses: actions/checkout@v4
 
@@ -93,7 +110,6 @@ jobs:
           path: app/coverage.xml
           if-no-files-found: warn
 
-      # Optional Snyk (Python deps)
       - name: Snyk scan (Python)
         if: env.SNYK_TOKEN != ''
         uses: snyk/actions/python@master
@@ -136,7 +152,6 @@ jobs:
           grep -q "Nintendo Shop" web-static-index.html
           grep -q 'href="https://www.nintendo.com/us/store/characters/mushroom-kingdom/' web-static-index.html
 
-      # Link check against saved HTML (containerized action can't hit localhost)
       - name: Link checker (lychee)
         uses: lycheeverse/lychee-action@v2
         with:
@@ -261,7 +276,7 @@ jobs:
     needs: [ smoke-test ]
     timeout-minutes: 40
     env:
-      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}   # optional; gate step with env below
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
     strategy:
       fail-fast: false
       matrix:
@@ -269,13 +284,16 @@ jobs:
           - name: service
             context: ./app
             dockerfile: Dockerfile
-            image_repo: ${{ env.DOCKERHUB_USERNAME }}/supermario-service
+            image_suffix: supermario-service
           - name: front
             context: ./web
             dockerfile: Dockerfile
-            image_repo: ${{ env.DOCKERHUB_USERNAME }}/supermario-front
+            image_suffix: supermario-front
     steps:
       - uses: actions/checkout@v4
+
+      - name: Compute DockerHub user env
+        run: echo "DOCKERHUB_USER=${{ secrets.DOCKERHUB_USERNAME || github.repository_owner }}" >> $GITHUB_ENV
 
       - name: Set up QEMU
         uses: docker/setup-qemu-action@v3
@@ -295,14 +313,14 @@ jobs:
         uses: docker/login-action@v3
         with:
           registry: ${{ env.REGISTRY }}
-          username: ${{ env.DOCKERHUB_USERNAME }}
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Docker metadata
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ${{ env.REGISTRY }}/${{ matrix.image_repo }}
+          images: ${{ env.REGISTRY }}/${{ env.DOCKERHUB_USER }}/${{ matrix.image_suffix }}
           tags: |
             type=ref,event=tag
             type=sha,format=short
@@ -310,7 +328,7 @@ jobs:
           labels: |
             org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
             org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.title=${{ matrix.image_repo }}
+            org.opencontainers.image.title=${{ matrix.image_suffix }}
 
       - name: Build and push
         id: build
@@ -335,9 +353,8 @@ jobs:
         id: digest
         run: |
           echo "digest=${{ steps.build.outputs.digest }}" >> $GITHUB_OUTPUT
-          echo "image=${{ env.REGISTRY }}/${{ matrix.image_repo }}" >> $GITHUB_OUTPUT
+          echo "image=${{ env.REGISTRY }}/${{ env.DOCKERHUB_USER }}/${{ matrix.image_suffix }}" >> $GITHUB_OUTPUT
 
-      # Optional Snyk scan on the pushed image
       - name: Snyk scan (container image)
         if: env.SNYK_TOKEN != ''
         uses: snyk/actions/docker@master
