@@ -36,8 +36,8 @@ jobs:
     steps:
       - name: Check required secrets
         env:
-          DHU:  ${{secrets.DOCKERHUB_USERNAME}}
-          DHT:  ${{secrets.DOCKERHUB_TOKEN}}
+          DHU: ${{secrets.DOCKERHUB_USERNAME}}
+          DHT: ${{secrets.DOCKERHUB_TOKEN}}
           SNYK: ${{secrets.SNYK_TOKEN}}
         run: |
           if [-z "$DHU"]; then echo "::error::Missing secret DOCKERHUB_USERNAME"; exit 1; fi
