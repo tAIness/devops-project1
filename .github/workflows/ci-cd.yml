@@ -19,7 +19,7 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: read
+  contents: write
   id-token: write
   packages: write
   actions: read
@@ -413,8 +413,11 @@ jobs:
         image: ${{ steps.digest.outputs.image }}@${{ steps.digest.outputs.digest }}
         format: spdx-json
         artifact-name: sbom-${{ matrix.name }}-${{ github.sha }}.spdx.json
-    - name: Upload SBOM artifact
-      uses: actions/upload-artifact@v4
+    - name: Generate SBOM (SPDX)
+      id: sbom
+      uses: anchore/sbom-action@v0
       with:
-        name: sbom-${{ matrix.name }}-${{ github.sha }}
-        path: ${{ steps.sbom.outputs.sbom }}
+        image: ${{ steps.digest.outputs.image }}@${{ steps.digest.outputs.digest }}
+        format: spdx-json
+        artifact-name: sbom-${{ matrix.name }}-${{ github.sha }}.spdx.json
+        upload-artifact: true
