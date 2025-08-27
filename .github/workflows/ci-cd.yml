@@ -47,7 +47,6 @@ jobs:
         if [ -z "$DHU" ]; then echo "::error::Missing secret DOCKERHUB_USERNAME"; exit 1; fi
         if [ -z "$DHT" ]; then echo "::error::Missing secret DOCKERHUB_TOKEN"; exit 1; fi
         if [ -z "$SNYK" ]; then echo "::notice::SNYK_TOKEN not set; security scans will be skipped."; fi
-
   # ---------- YAML & workflow verification ----------
   yaml-verify:
     name: YAML verify (yamllint, actionlint, compose config)
@@ -140,6 +139,9 @@ jobs:
     needs:
     - yaml-verify
     timeout-minutes: 12
+    env:
+      DOCKER_USER: ci
+      TAG: local
     steps:
     - uses: actions/checkout@v4
     - name: Show Docker versions
@@ -148,14 +150,18 @@ jobs:
         docker compose version
     - name: Build front image
       run: docker compose build front
-      env:
-        DOCKER_USER: ci
-        TAG: local
     - name: Run front
       run: docker compose up -d front
+    - name: Build front image
       env:
         DOCKER_USER: ci
         TAG: local
+      run: docker compose build front
+    - name: Run front
+      env:
+        DOCKER_USER: ci
+        TAG: local
+      run: docker compose up -d front
     - name: Wait for front (HTTP 200)
       run: |
         for i in {1..60}; do
@@ -194,6 +200,9 @@ jobs:
     needs:
     - test-web
     timeout-minutes: 20
+    env:
+      DOCKER_USER: ci
+      TAG: local
     steps:
     - uses: actions/checkout@v4
     - name: Show repo tree (top + e2e)
@@ -217,6 +226,9 @@ jobs:
     - name: Show Playwright version
       run: npx playwright --version
     - name: Build & run front
+      env:
+        DOCKER_USER: ci
+        TAG: local
       run: |
         docker compose build front
         docker compose up -d front
@@ -227,9 +239,6 @@ jobs:
           sleep 1
         done
         curl -fsS http://localhost:8080/ >/dev/null
-      env:
-        DOCKER_USER: ci
-        TAG: local
     - name: Run Playwright tests
       env:
         BASE_URL: http://localhost:8080
@@ -256,27 +265,29 @@ jobs:
     - test-app
     - e2e-web
     timeout-minutes: 15
+    env:
+      DOCKER_USER: ci
+      TAG: local
     steps:
     - uses: actions/checkout@v4
     - name: Build images
       run: docker compose build
-      env:
-        DOCKER_USER: ci
-        TAG: local
     - name: Start backend (service)
       run: |
         docker compose up -d service
-        # wait loop...
-        env:
-        DOCKER_USER: ci
-        TAG: local
+        for i in {1..60}; do
+        if curl -fsS http://localhost:8000/; then echo "service is up"; break; fi
+        sleep 1
+        done
+        curl -fsS http://localhost:8000/
     - name: Start front (nginx)
       run: |
         docker compose up -d front
-        # wait loop...
-      env:
-        DOCKER_USER: ci
-        TAG: local
+        for i in {1..60}; do
+          if curl -fsS http://localhost:8080/; then echo "front is up"; break; fi
+          sleep 1
+        done
+        curl -fsS http://localhost:8080/
     - name: Show logs on failure
       if: failure()
       run: |
