@@ -413,11 +413,4 @@ jobs:
         image: ${{ steps.digest.outputs.image }}@${{ steps.digest.outputs.digest }}
         format: spdx-json
         artifact-name: sbom-${{ matrix.name }}-${{ github.sha }}.spdx.json
-    - name: Generate SBOM (SPDX)
-      id: sbom
-      uses: anchore/sbom-action@v0
-      with:
-        image: ${{ steps.digest.outputs.image }}@${{ steps.digest.outputs.digest }}
-        format: spdx-json
-        artifact-name: sbom-${{ matrix.name }}-${{ github.sha }}.spdx.json
         upload-artifact: true
