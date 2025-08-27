@@ -6,12 +6,11 @@ ignore: |
   playwright-report/*
   **/*.spdx.json
 rules:
-  max: 140
-  level: warning
-  line-length: disable        # (optional) ignore long lines
   document-start: disable      # no warning about missing '---'
-    # indentation:
-    #   level: warning           # example: downgrade indentation to warning
+  truthy: disable              # no warning about "on/off/yes/n
+  line-length:
+    max: 200
+    level: warning             # warn only, do not fail the job
   indentation:
     indent-sequences: false
-  truthy: disable # no warning about "on/off/yes/n
+    #    level: warning        # example: downgrade indentation to warning
