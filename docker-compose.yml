@@ -1,9 +1,10 @@
+# docker-compose.yml (no 'version:' key needed)
 services:
   service:
+    image: ${DOCKER_USER:-local}/supermario-service:${TAG:-dev}
     build:
       context: ./app
       dockerfile: Dockerfile
-    image: ${DOCKER_USER}/supermario-service:${TAG}
     container_name: supermario-service
     environment:
       PORT: "8000"
@@ -14,10 +15,10 @@ services:
     restart: unless-stopped
 
   front:
+    image: ${DOCKER_USER:-local}/supermario-front:${TAG:-dev}
     build:
       context: ./web
       dockerfile: Dockerfile
-    image: ${DOCKER_USER}/supermario-front:${TAG}
     container_name: supermario-front
     ports:
     - "8080:80"

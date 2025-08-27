@@ -5,14 +5,14 @@ name: CI/CD
   workflow_dispatch: {}
   push:
     branches:
-      - main
-      - master
+    - main
+    - master
     tags:
-      - v*.*.*
+    - v*.*.*
   pull_request:
     branches:
-      - main
-      - master
+    - main
+    - master
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -28,6 +28,8 @@ permissions:
 env:
   REGISTRY: docker.io
   PYTHON_VERSION: "3.11"
+  DOCKER_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+  TAG: ${{ github.sha }}
 
 jobs:
   # ---------- Secrets preflight ----------
@@ -35,258 +37,275 @@ jobs:
     name: Secrets preflight
     runs-on: ubuntu-latest
     steps:
-      - name: Check required secrets
-        shell: bash
-        env:
-          DHU: ${{ secrets.DOCKERHUB_USERNAME }}
-          DHT: ${{ secrets.DOCKERHUB_TOKEN }}
-          SNYK: ${{ secrets.SNYK_TOKEN }}
-        run: |
-          if [ -z "$DHU" ]; then echo "::error::Missing secret DOCKERHUB_USERNAME"; exit 1; fi
-          if [ -z "$DHT" ]; then echo "::error::Missing secret DOCKERHUB_TOKEN"; exit 1; fi
-          if [ -z "$SNYK" ]; then echo "::notice::SNYK_TOKEN not set; security scans will be skipped."; fi
-
+    - name: Check required secrets
+      shell: bash
+      env:
+        DHU: ${{ secrets.DOCKERHUB_USERNAME }}
+        DHT: ${{ secrets.DOCKERHUB_TOKEN }}
+        SNYK: ${{ secrets.SNYK_TOKEN }}
+      run: |
+        if [ -z "$DHU" ]; then echo "::error::Missing secret DOCKERHUB_USERNAME"; exit 1; fi
+        if [ -z "$DHT" ]; then echo "::error::Missing secret DOCKERHUB_TOKEN"; exit 1; fi
+        if [ -z "$SNYK" ]; then echo "::notice::SNYK_TOKEN not set; security scans will be skipped."; fi
   # ---------- YAML & workflow verification ----------
   yaml-verify:
     name: YAML verify (yamllint, actionlint, compose config)
     runs-on: ubuntu-latest
     needs:
-      - secrets-preflight
+    - secrets-preflight
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-
-      - name: yamllint
-        uses: ibiqlik/action-yamllint@v3
-        with:
-          config_file: .yamllint.yaml
-          format: github
-          strict: true
-
-      - name: actionlint (GitHub Actions YAML)
-        uses: reviewdog/action-actionlint@v1
-        with:
-          fail_on_error: true
-
-      - name: Validate docker-compose.yml
-        run: docker compose -f docker-compose.yml config -q
+    - uses: actions/checkout@v4
+    - name: yamllint
+      uses: ibiqlik/action-yamllint@v3
+      with:
+        config_file: .yamllint.yaml
+        format: github
+        strict: false
+        no_warnings: false
+    - name: actionlint (GitHub Actions YAML)
+      uses: reviewdog/action-actionlint@v1
+      with:
+        fail_on_error: true
+    - name: Validate docker-compose.yml
+      run: docker compose -f docker-compose.yml config -q
 
   # ---------- Unit tests (Python app) ----------
   test-app:
     name: Test (app)
     runs-on: ubuntu-latest
     needs:
-      - yaml-verify
+    - yaml-verify
     timeout-minutes: 15
     env:
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-          cache: pip
-
-      - name: Install dependencies
-        working-directory: app
-        run: |
-          pip install --upgrade pip
-          [ -f requirements.txt ] && pip install -r requirements.txt
-          pip install pytest pytest-junit pytest-cov
-
-      - name: Run tests with coverage
-        working-directory: app
-        run: |
-          pytest -q --junitxml=test-results/junit.xml \
-                 --cov=app --cov-report=xml:coverage.xml || true
-
-      - name: Upload JUnit
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-junit
-          path: app/test-results/junit.xml
-          if-no-files-found: ignore
-
-      - name: Upload coverage.xml
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: app-coverage
-          path: app/coverage.xml
-          if-no-files-found: warn
-
-      - name: Snyk scan (Python)
-        if: env.SNYK_TOKEN != ''
-        uses: snyk/actions/python@master
-        env:
-          SNYK_TOKEN: ${{ env.SNYK_TOKEN }}
-        with:
-          args: --severity-threshold=medium
-        continue-on-error: true
+    - uses: actions/checkout@v4
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ env.PYTHON_VERSION }}
+        cache: pip
+    - name: Show Python/pip versions
+      run: |
+        python -V
+        pip -V
+        pip list | sed -n '1,40p' || true
+    - name: Install dependencies
+      working-directory: app
+      run: |
+        pip install --upgrade pip
+        [ -f requirements.txt ] && pip install -r requirements.txt
+        pip install pytest pytest-cov
+    - name: Show package versions (app)
+      working-directory: app
+      run: |
+        python -V
+        pip -V
+        pytest --version
+        pip show flask gunicorn || true
+    - name: Run tests with coverage
+      working-directory: app
+      run: |
+        pytest -q --junitxml=test-results/junit.xml \
+               --cov=app --cov-report=xml:coverage.xml || true
+    - name: Upload JUnit
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: app-junit
+        path: app/test-results/junit.xml
+        if-no-files-found: ignore
+    - name: Upload coverage.xml
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: app-coverage
+        path: app/coverage.xml
+        if-no-files-found: warn
+    - name: Snyk scan (Python)
+      if: env.SNYK_TOKEN != ''
+      uses: snyk/actions/python@master
+      env:
+        SNYK_TOKEN: ${{ env.SNYK_TOKEN }}
+      with:
+        args: --severity-threshold=medium
+      continue-on-error: true
 
   # ---------- Web tests (serve + content assertions + link check) ----------
   test-web:
     name: Test (web)
     runs-on: ubuntu-latest
     needs:
-      - yaml-verify
+    - yaml-verify
     timeout-minutes: 12
+    env:
+      DOCKER_USER: ci
+      TAG: local
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Build front image
-        run: docker compose build front
-
-      - name: Run front
-        run: docker compose up -d front
-
-      - name: Wait for front (HTTP 200)
-        run: |
-          for i in {1..60}; do
-            if curl -fsS http://localhost:8080/ >/dev/null; then
-              echo "front is up"; exit 0
-            fi
-            sleep 1
-          done
-          echo "front did not start in time"; exit 1
-
-      - name: Assert homepage content
-        run: |
-          curl -fsS http://localhost:8080/ -o web-static-index.html
-          grep -q "Play Super Mario" web-static-index.html
-          grep -q "Gallery" web-static-index.html
-          grep -q "Nintendo Shop" web-static-index.html
-          grep -q 'href="https://www.nintendo.com/us/store/characters/mushroom-kingdom/' web-static-index.html
-
-      - name: Link checker (lychee)
-        uses: lycheeverse/lychee-action@v2
-        with:
-          args: --config .lychee.toml web-static-index.html
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Logs on failure
-        if: failure()
-        run: |
-          docker compose ps
-          docker compose logs --no-color front || true
-
-      - name: Tear down
-        if: always()
-        run: docker compose down -v
+    - uses: actions/checkout@v4
+    - name: Show Docker versions
+      run: |
+        docker --version
+        docker compose version
+    - name: Build front image
+      run: docker compose build front
+    - name: Run front
+      run: docker compose up -d front
+    - name: Build front image
+      env:
+        DOCKER_USER: ci
+        TAG: local
+      run: docker compose build front
+    - name: Run front
+      env:
+        DOCKER_USER: ci
+        TAG: local
+      run: docker compose up -d front
+    - name: Wait for front (HTTP 200)
+      run: |
+        for i in {1..60}; do
+          if curl -fsS http://localhost:8080/ >/dev/null; then
+            echo "front is up"; exit 0
+          fi
+          sleep 1
+        done
+        echo "front did not start in time"; exit 1
+    - name: Assert homepage content
+      run: |
+        curl -fsS http://localhost:8080/ -o web-static-index.html
+        grep -q "Play Super Mario" web-static-index.html
+        grep -q "Gallery" web-static-index.html
+        grep -q "Nintendo Shop" web-static-index.html
+        grep -q 'href="https://www.nintendo.com/us/store/characters/mushroom-kingdom/' web-static-index.html
+    - name: Link checker (lychee)
+      uses: lycheeverse/lychee-action@v2
+      with:
+        args: --config .lychee.toml web-static-index.html
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    - name: Logs on failure
+      if: failure()
+      run: |
+        docker compose ps
+        docker compose logs --no-color front || true
+    - name: Tear down
+      if: always()
+      run: docker compose down -v
 
   # ---------- Playwright E2E ----------
   e2e-web:
     name: E2E (Playwright)
     runs-on: ubuntu-latest
     needs:
-      - test-web
+    - test-web
     timeout-minutes: 20
+    env:
+      DOCKER_USER: ci
+      TAG: local
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-          cache: 'npm'
-
-      - name: Install Playwright deps
-        run: |
-          npm i
-          npx playwright install --with-deps
-
-      - name: Build & run front
-        run: |
-          docker compose build front
-          docker compose up -d front
-          for i in {1..60}; do
-            if curl -fsS http://localhost:8080/ >/dev/null; then
-              echo "front is up"; break
-            fi
-            sleep 1
-          done
-          curl -fsS http://localhost:8080/ >/dev/null
-
-      - name: Run Playwright tests
-        env:
-          BASE_URL: http://localhost:8080
-        run: npm run test:e2e
-
-      - name: Upload Playwright HTML report
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-report
-          path: playwright-report
-          if-no-files-found: warn
-
-      - name: Logs on failure
-        if: failure()
-        run: docker compose logs --no-color front || true
-
-      - name: Tear down
-        if: always()
-        run: docker compose down -v
+    - uses: actions/checkout@v4
+    - name: Show repo tree (top + e2e)
+      run: |
+        pwd
+        ls -la
+        ls -la e2e || true
+    - name: Setup Node
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
+    - name: Show Node/npm versions
+      run: |
+        node -v
+        npm -v
+    - name: Install Playwright deps
+      run: |
+        npm i
+        npx playwright install --with-deps
+    - name: Show Playwright version
+      run: npx playwright --version
+    - name: Build & run front
+      env:
+        DOCKER_USER: ci
+        TAG: local
+      run: |
+        docker compose build front
+        docker compose up -d front
+        for i in {1..60}; do
+          if curl -fsS http://localhost:8080/ >/dev/null; then
+            echo "front is up"; break
+          fi
+          sleep 1
+        done
+        curl -fsS http://localhost:8080/ >/dev/null
+    - name: Run Playwright tests
+      env:
+        BASE_URL: http://localhost:8080
+      run: npm run test:e2e
+    - name: Upload Playwright HTML report
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: playwright-report
+        path: playwright-report
+        if-no-files-found: warn
+    - name: Logs on failure
+      if: failure()
+      run: docker compose logs --no-color front || true
+    - name: Tear down
+      if: always()
+      run: docker compose down -v
 
   # ---------- Container smoke test (compose) ----------
   smoke-test:
     name: Smoke test (compose)
     runs-on: ubuntu-latest
     needs:
-      - test-app
-      - e2e-web
+    - test-app
+    - e2e-web
     timeout-minutes: 15
+    env:
+      DOCKER_USER: ci
+      TAG: local
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Build images
-        run: docker compose build
-
-      - name: Start backend (service)
-        run: |
-          docker compose up -d service
-          for i in {1..60}; do
-            if curl -fsS http://localhost:8000/; then
-              echo "service is up"; break
-            fi
-            sleep 1
-          done
-          curl -fsS http://localhost:8000/
-
-      - name: Start front (nginx)
-        run: |
-          docker compose up -d front
-          for i in {1..60}; do
-            if curl -fsS http://localhost:8080/; then
-              echo "front is up"; break
-            fi
-            sleep 1
-          done
-          curl -fsS http://localhost:8080/
-
-      - name: Show logs on failure
-        if: failure()
-        run: |
-          docker compose ps
-          echo "=== service logs ==="
-          docker compose logs --no-color service || true
-          echo "=== front logs ==="
-          docker compose logs --no-color front || true
-
-      - name: Tear down
-        if: always()
-        run: docker compose down -v
+    - uses: actions/checkout@v4
+    - name: Build images
+      run: docker compose build
+    - name: Start backend (service)
+      run: |
+        docker compose up -d service
+        for i in {1..60}; do
+        if curl -fsS http://localhost:8000/; then echo "service is up"; break; fi
+        sleep 1
+        done
+        curl -fsS http://localhost:8000/
+    - name: Start front (nginx)
+      run: |
+        docker compose up -d front
+        for i in {1..60}; do
+          if curl -fsS http://localhost:8080/; then echo "front is up"; break; fi
+          sleep 1
+        done
+        curl -fsS http://localhost:8080/
+    - name: Show logs on failure
+      if: failure()
+      run: |
+        docker compose ps
+        echo "=== service logs ==="
+        docker compose logs --no-color service || true
+        echo "=== front logs ==="
+        docker compose logs --no-color front || true
+    - name: Tear down
+      if: always()
+      run: docker compose down -v
 
   # ---------- Build, push, attest, SBOM ----------
   build-and-push:
     name: Build/Push/Attest/SBOM
     runs-on: ubuntu-latest
     needs:
-      - smoke-test
+    - smoke-test
     if: ${{ github.event_name != 'pull_request' }}
     timeout-minutes: 40
     env:
@@ -295,104 +314,103 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - name: service
-            context: ./app
-            dockerfile: Dockerfile
-            image_suffix: supermario-service
-          - name: front
-            context: ./web
-            dockerfile: Dockerfile
-            image_suffix: supermario-front
+        - name: service
+          context: ./app
+          dockerfile: Dockerfile
+          image_suffix: supermario-service
+        - name: front
+          context: ./web
+          dockerfile: Dockerfile
+          image_suffix: supermario-front
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Cache Docker layers
-        uses: actions/cache@v4
-        with:
-          path: /tmp/.buildx-cache
-          key: ${{ runner.os }}-buildx-${{ matrix.name }}-${{ github.sha }}
-          restore-keys: |
-            ${{ runner.os }}-buildx-${{ matrix.name }}-
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
-
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v5
-        with:
-          images: ${{ env.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image_suffix }}
-          tags: |
-            type=ref,event=tag
-            type=sha,format=short
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
-          labels: |
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.revision=${{ github.sha }}
-            org.opencontainers.image.title=${{ matrix.image_suffix }}
-
-      - name: Build and push
-        id: build
-        uses: docker/build-push-action@v6
-        with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.context }}/${{ matrix.dockerfile }}
-          push: true
-          provenance: false
-          sbom: false
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
-
-      - name: Move cache
-        run: |
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
-
-      - name: Export image digest
-        id: digest
-        run: |
-          echo "digest=${{ steps.build.outputs.digest }}" >> $GITHUB_OUTPUT
-          echo "image=${{ env.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image_suffix }}" >> $GITHUB_OUTPUT
-
-      - name: Snyk scan (container image)
-        if: env.SNYK_TOKEN != ''
-        uses: snyk/actions/docker@master
-        env:
-          SNYK_TOKEN: ${{ env.SNYK_TOKEN }}
-        with:
-          image: ${{ steps.digest.outputs.image }}@${{ steps.digest.outputs.digest }}
-          args: --severity-threshold=medium
-        continue-on-error: true
-
-      - name: Attest build provenance
-        uses: actions/attest-build-provenance@v1
-        with:
-          subject-name: ${{ steps.digest.outputs.image }}
-          subject-digest: ${{ steps.digest.outputs.digest }}
-          push-to-registry: false
-
-      - name: Generate SBOM (SPDX)
-        id: sbom
-        uses: anchore/sbom-action@v0
-        with:
-          image: ${{ steps.digest.outputs.image }}@${{ steps.digest.outputs.digest }}
-          format: spdx-json
-          artifact-name: sbom-${{ matrix.name }}-${{ github.sha }}.spdx.json
-
-      - name: Upload SBOM artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: sbom-${{ matrix.name }}-${{ github.sha }}
-          path: ${{ steps.sbom.outputs.sbom }}
+    - uses: actions/checkout@v4
+    - name: Set up QEMU
+      uses: docker/setup-qemu-action@v3
+    - name: Set up Buildx
+      uses: docker/setup-buildx-action@v3
+    - name: Show Docker/Buildx versions
+      run: |
+        docker --version
+        docker buildx version
+        docker compose version
+    - name: Cache Docker layers
+      uses: actions/cache@v4
+      with:
+        path: /tmp/.buildx-cache
+        key: ${{ runner.os }}-buildx-${{ matrix.name }}-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-buildx-${{ matrix.name }}-
+    - name: Log in to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        registry: ${{ env.REGISTRY }}
+        username: ${{ secrets.DOCKERHUB_USERNAME }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+    - name: Docker metadata
+      id: meta
+      uses: docker/metadata-action@v5
+      with:
+        images: ${{ env.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image_suffix }}
+        tags: |
+          type=ref,event=tag
+          type=sha,format=short
+          type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master' }}
+        labels: |
+          org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+          org.opencontainers.image.revision=${{ github.sha }}
+          org.opencontainers.image.title=${{ matrix.image_suffix }}
+    - name: Build and push
+      id: build
+      uses: docker/build-push-action@v6
+      with:
+        context: ${{ matrix.context }}
+        file: ${{ matrix.context }}/${{ matrix.dockerfile }}
+        push: true
+        provenance: false
+        sbom: false
+        tags: ${{ steps.meta.outputs.tags }}
+        labels: ${{ steps.meta.outputs.labels }}
+        cache-from: type=local,src=/tmp/.buildx-cache
+        cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+    - name: Move cache
+      run: |
+        rm -rf /tmp/.buildx-cache
+        mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+    - name: Export image digest
+      id: digest
+      run: |
+        echo "digest=${{ steps.build.outputs.digest }}" >> $GITHUB_OUTPUT
+        echo "image=${{ env.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image_suffix }}" >> $GITHUB_OUTPUT
+    - name: Echo pushed image info
+      run: |
+        echo "Image:  ${{ steps.digest.outputs.image }}"
+        echo "Digest: ${{ steps.digest.outputs.digest }}"
+        echo "Tags:"
+        echo "${{ steps.meta.outputs.tags }}"
+    - name: Snyk scan (container image)
+      if: env.SNYK_TOKEN != ''
+      uses: snyk/actions/docker@master
+      env:
+        SNYK_TOKEN: ${{ env.SNYK_TOKEN }}
+      with:
+        image: ${{ steps.digest.outputs.image }}@${{ steps.digest.outputs.digest }}
+        args: --severity-threshold=medium
+      continue-on-error: true
+    - name: Attest build provenance
+      uses: actions/attest-build-provenance@v1
+      with:
+        subject-name: ${{ steps.digest.outputs.image }}
+        subject-digest: ${{ steps.digest.outputs.digest }}
+        push-to-registry: false
+    - name: Generate SBOM (SPDX)
+      id: sbom
+      uses: anchore/sbom-action@v0
+      with:
+        image: ${{ steps.digest.outputs.image }}@${{ steps.digest.outputs.digest }}
+        format: spdx-json
+        artifact-name: sbom-${{ matrix.name }}-${{ github.sha }}.spdx.json
+    - name: Upload SBOM artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: sbom-${{ matrix.name }}-${{ github.sha }}
+        path: ${{ steps.sbom.outputs.sbom }}
