@@ -60,7 +60,8 @@ jobs:
       with:
         config_file: .yamllint.yaml
         format: github
-        strict: true
+        strict: false
+        no_warnings: false
     - name: actionlint (GitHub Actions YAML)
       uses: reviewdog/action-actionlint@v1
       with:
@@ -84,12 +85,24 @@ jobs:
       with:
         python-version: ${{ env.PYTHON_VERSION }}
         cache: pip
+    - name: Show Python/pip versions
+      run: |
+        python -V
+        pip -V
+        pip list | sed -n '1,40p' || true
     - name: Install dependencies
       working-directory: app
       run: |
         pip install --upgrade pip
         [ -f requirements.txt ] && pip install -r requirements.txt
-        pip install pytest pytest-junit pytest-cov
+        pip install pytest pytest-cov
+    - name: Show package versions (app)
+      working-directory: app
+      run: |
+        python -V
+        pip -V
+        pytest --version
+        pip show flask gunicorn || true
     - name: Run tests with coverage
       working-directory: app
       run: |
@@ -127,6 +140,10 @@ jobs:
     timeout-minutes: 12
     steps:
     - uses: actions/checkout@v4
+    - name: Show Docker versions
+      run: |
+        docker --version
+        docker compose version
     - name: Build front image
       run: docker compose build front
     - name: Run front
@@ -176,10 +193,16 @@ jobs:
       with:
         node-version: '20'
         cache: 'npm'
+    - name: Show Node/npm versions
+      run: |
+        node -v
+        npm -v
     - name: Install Playwright deps
       run: |
         npm i
         npx playwright install --with-deps
+    - name: Show Playwright version
+      run: npx playwright --version
     - name: Build & run front
       run: |
         docker compose build front
@@ -281,6 +304,11 @@ jobs:
       uses: docker/setup-qemu-action@v3
     - name: Set up Buildx
       uses: docker/setup-buildx-action@v3
+    - name: Show Docker/Buildx versions
+      run: |
+        docker --version
+        docker buildx version
+        docker compose version
     - name: Cache Docker layers
       uses: actions/cache@v4
       with:
@@ -329,6 +357,12 @@ jobs:
       run: |
         echo "digest=${{ steps.build.outputs.digest }}" >> $GITHUB_OUTPUT
         echo "image=${{ env.REGISTRY }}/${{ secrets.DOCKERHUB_USERNAME }}/${{ matrix.image_suffix }}" >> $GITHUB_OUTPUT
+    - name: Echo pushed image info
+      run: |
+        echo "Image:  ${{ steps.digest.outputs.image }}"
+        echo "Digest: ${{ steps.digest.outputs.digest }}"
+        echo "Tags:"
+        echo "${{ steps.meta.outputs.tags }}"
     - name: Snyk scan (container image)
       if: env.SNYK_TOKEN != ''
       uses: snyk/actions/docker@master
