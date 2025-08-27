@@ -9,6 +9,11 @@ rules:
   line-length:
     max: 140
     level: warning
+    document-start: disable     # stops the “missing ---” warning
+    truthy: disable             # stops warnings about on/off/yes/no, etc.
+    line-length: disable        # (optional) ignore long lines
+    # indentation:
+    #   level: warning           # example: downgrade indentation to warning
   indentation:
     indent-sequences: false
   truthy: enable
