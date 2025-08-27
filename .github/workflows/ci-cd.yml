@@ -196,6 +196,11 @@ jobs:
     timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
+    - name: Show repo tree (top + e2e)
+      run: |
+        pwd
+        ls -la
+        ls -la e2e || true
     - name: Setup Node
       uses: actions/setup-node@v4
       with:
