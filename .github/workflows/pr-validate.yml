@@ -1,0 +1,21 @@
+# .github/workflows/pr-validate.yml
+name: PR - Validate
+on:
+  pull_request:
+    branches: [ main, master ]
+    # (optional) speed up by filtering to likely-relevant paths:
+    paths:
+      - '**/*.yml'
+      - '**/*.yaml'
+      - '.github/workflows/**'
+      - 'docker-compose.yml'
+      - '**/*.md'
+      - '**/*.sh'
+      - 'Dockerfile'
+      - 'Dockerfile.*'
+      - '**/*.Dockerfile'
+permissions: read-all
+
+jobs:
+  validate:
+    uses: tAIness/ci-lib/.github/workflows/validate.yml@v1.0.0
