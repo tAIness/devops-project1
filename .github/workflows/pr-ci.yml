@@ -6,7 +6,7 @@ permissions: read-all
 
 jobs:
   validate:
-    uses: tAIness/ci-lib/.github/workflows/validate.yml@v1.0.0
+    uses: tAIness/ci-lib/.github/workflows/validate.yml@main
     with:
       yamllint_strict: false   # warnings don't fail; change to true if you prefer
 
