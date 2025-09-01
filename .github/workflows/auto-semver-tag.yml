@@ -2,7 +2,7 @@ name: Auto SemVer tag
 on:
   push:
     branches:
-      - main
+    - main
   workflow_dispatch:
     inputs:
       force_bump:
@@ -11,10 +11,10 @@ on:
         required: false
         default: ""
         options:
-          - ""
-          - patch
-          - minor
-          - major
+        - ""
+        - patch
+        - minor
+        - major
 
 permissions:
   contents: write
@@ -33,7 +33,7 @@ jobs:
 
   cut:
     needs:
-      - decide
+    - decide
     uses: tAIness/devops-ci-lib/.github/workflows/cut-tag.yml@v1.1.0
     with:
       bump: ${{ needs.decide.outputs.bump }}
