@@ -6,20 +6,20 @@ permissions: read-all
 
 jobs:
   validate:
-    uses: tAIness/ci-lib/.github/workflows/validate.yml@main
+    uses: tAIness/devops-ci-lib/.github/workflows/validate.yml@main
     with:
       yamllint_strict: false   # warnings don't fail; change to true if you prefer
 
   python:
     needs: [validate]
-    uses: tAIness/ci-lib/.github/workflows/python-tests.yml@main
+    uses: tAIness/devops-ci-lib/.github/workflows/python-tests.yml@main
     with:
       workdir: app
       python_version: "3.11"
 
   web-smoke:
     needs: [validate]
-    uses: tAIness/ci-lib/.github/workflows/web-smoke.yml@main
+    uses: tAIness/devops-ci-lib/.github/workflows/web-smoke.yml@main
     with:
       service: front
       url: http://localhost:8080/
@@ -32,7 +32,7 @@ jobs:
 
   e2e:
     needs: [web-smoke]
-    uses: tAIness/ci-lib/.github/workflows/playwright-e2e.yml@main
+    uses: tAIness/devops-ci-lib/.github/workflows/playwright-e2e.yml@main
     with:
       node_version: "20"
       base_url: http://localhost:8080

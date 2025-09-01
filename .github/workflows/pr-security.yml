@@ -17,7 +17,7 @@ permissions: read-all
 
 jobs:
   security:
-    uses: tAIness/ci-lib/.github/workflows/security.yml@v1.0.0
+    uses: tAIness/devops-ci-lib/.github/workflows/security.yml@v1.0.0
     with:
       scan_deps: true
       scan_images: false

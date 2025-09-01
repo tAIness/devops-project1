@@ -5,4 +5,4 @@ on:
 permissions: read-all
 jobs:
   validate:
-    uses: tAIness/ci-lib/.github/workflows/validate.yml@main
+    uses: tAIness/devops-ci-lib/.github/workflows/validate.yml@main
