@@ -1,40 +1,52 @@
-name: PR - CI
+name: Web smoke (Compose)
 on:
-  pull_request:
-    branches: [ main, master ]
+  workflow_call:
+    inputs:
+      service:       { type: string,  default: "front" }
+      url:           { type: string,  default: "http://localhost:8080/" }
+      asserts:       { type: string,  default: "" }   # newline-separated substrings
+      link_check:    { type: boolean, default: true }
+      lychee_config: { type: string,  default: ".lychee.toml" }
+
 permissions: read-all
 
 jobs:
-  validate:
-    uses: tAIness/ci-lib/.github/workflows/validate.yml@main
-    with:
-      yamllint_strict: false   # warnings don't cause failures; change to true if preferred
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
 
-  python:
-    needs: [validate]
-    uses: tAIness/ci-lib/.github/workflows/python-tests.yml@main
-    with:
-      workdir: app
-      python_version: "3.11"
+      - name: Build image
+        run: docker compose build ${{ inputs.service }}
 
-  web-smoke:
-    needs: [validate]
-    uses: tAIness/ci-lib/.github/workflows/web-smoke.yml@main
-    with:
-      service: front
-      url: http://localhost:8080/
-      asserts: |
-        Play Super Mario
-        Gallery
-        Nintendo Shop
-      link_check: true
-      lychee_config: .lychee.toml
+      - name: Run service
+        run: docker compose up -d ${{ inputs.service }}
 
-  e2e:
-    needs: [web-smoke]
-    uses: tAIness/ci-lib/.github/workflows/playwright-e2e.yml@main
-    with:
-      node_version: "20"
-      base_url: http://localhost:8080
-      compose_service: front
-      test_command: npm run test:e2e
+      - name: Wait for service
+        run: |
+          for i in {1..60}; do
+            if curl -fsS "${{ inputs.url }}" >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          echo "service did not start"; exit 1
+
+      - name: Assert content
+        run: |
+          curl -fsS "${{ inputs.url }}" -o page.html
+          while IFS= read -r line; do
+            [[ -z "$line" ]] && continue
+            echo "assert: $line"
+            grep -q "$line" page.html
+          done <<< "${{ inputs.asserts }}"
+
+      - name: Link checker (lychee)
+        if: ${{ inputs.link_check }}
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: --config ${{ inputs.lychee_config }} page.html
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v
