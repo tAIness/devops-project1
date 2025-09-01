@@ -1,0 +1,16 @@
+name: Security - Nightly
+on:
+  schedule:
+    - cron: '0 2 * * *'   # 02:00 UTC ≈ 05:00 Asia/Jerusalem
+  workflow_dispatch: {}
+permissions: read-all
+
+jobs:
+  security:
+    uses: tAIness/ci-lib/.github/workflows/security.yml@v1.0.0
+    with:
+      scan_deps: true
+      scan_images: false
+      severity: medium
+      soft_fail: false
+    secrets: inherit

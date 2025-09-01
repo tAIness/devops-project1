@@ -3,7 +3,7 @@
   <component name="ProjectModuleManager">
     <modules>
       <module fileurl="file://$PROJECT_DIR$/../work/devops-ci-lib/.idea/devops-ci-lib.iml" filepath="$PROJECT_DIR$/../work/devops-ci-lib/.idea/devops-ci-lib.iml" />
-      <module fileurl="file://$PROJECT_DIR$/.idea/supermario.iml" filepath="$PROJECT_DIR$/.idea/supermario.iml" />
+      <module fileurl="file://$PROJECT_DIR$/.idea/devops-project1.iml" filepath="$PROJECT_DIR$/.idea/devops-project1.iml" />
     </modules>
   </component>
 </project>
