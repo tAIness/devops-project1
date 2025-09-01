@@ -1,4 +1,4 @@
-name: Cut release tag (manual)
+name: Cut release tag
 on:
   workflow_dispatch:
     inputs:
@@ -6,24 +6,20 @@ on:
         description: patch | minor | major
         type: choice
         required: true
+        default: patch
         options:
           - patch
           - minor
           - major
+
 permissions:
   contents: write
 
 jobs:
   cut:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Cut tag
-        uses: ./.github/workflows/_cut-tag.yml   # or your reusable
-        with:
-          bump: ${{ github.event.inputs.bump }}
-          prefix: v
-          initial_version: 1.0.0
-          create_github_release: true
+    uses: tAIness/devops-ci-lib/.github/workflows/cut-tag.yml@v1.1.0
+    with:
+      bump: ${{ github.event.inputs.bump }}
+      prefix: v
+      initial_version: 1.0.0
+      create_github_release: true

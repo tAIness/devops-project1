@@ -15,23 +15,26 @@ on:
           - patch
           - minor
           - major
+
 permissions:
   contents: write
+
 concurrency:
   group: auto-semver-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   decide:
-    uses: tAIness/devops-ci-lib/.github/workflows/semver-decide.yml@main   # pin to a tag later
+    uses: tAIness/devops-ci-lib/.github/workflows/semver-decide.yml@v1.1.0
     with:
       prefix: v
       initial_version: 1.0.0
       force_bump: ${{ github.event.inputs.force_bump || '' }}
 
   cut:
-    needs: [decide]
-    uses: tAIness/devops-ci-lib/.github/workflows/cut-tag.yml@main         # pin to a tag later
+    needs:
+      - decide
+    uses: tAIness/devops-ci-lib/.github/workflows/cut-tag.yml@v1.1.0
     with:
       bump: ${{ needs.decide.outputs.bump }}
       prefix: v
