@@ -4,7 +4,7 @@ test('homepage shows cards and links work', async ({ page }) => {
   await page.goto('/');
 
   await expect(page.getByRole('heading', { level: 1, name: /super mario/i })).toBeVisible();
-  await expect(page.getByText(/play super mario/i)).toBeVisible();
+  await expect(page.getByText(/play super mario game/i)).toBeVisible();
   await expect(page.getByText(/gallery/i)).toBeVisible();
 
   const nintendoLink = page.getByRole('link', { name: /nintendo shop/i });
