@@ -6,7 +6,7 @@ permissions: read-all
 
 jobs:
   release:
-    uses: tAIness/ci-lib/.github/workflows/docker-release.yml@v1.0.0
+    uses: tAIness/devops-ci-lib/.github/workflows/docker-release.yml@v1.0.0
     with:
       registry: docker.io
       builds_json: >
@@ -18,7 +18,7 @@ jobs:
 
   security:
     needs: [release]
-    uses: <tAIness>/ci-lib/.github/workflows/security.yml@v1.0.0
+    uses: <tAIness>/devops-ci-lib/.github/workflows/security.yml@v1.0.0
     with:
       scan_deps: false
       scan_images: true

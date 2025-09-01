@@ -6,4 +6,4 @@ permissions: read-all
 
 jobs:
   ping:
-    uses: tAIness/ci-lib/.github/workflows/ping.yml@main
+    uses: tAIness/devops-ci-lib/.github/workflows/ping.yml@main
