@@ -8,7 +8,7 @@ jobs:
   validate:
     uses: tAIness/ci-lib/.github/workflows/validate.yml@main
     with:
-      yamllint_strict: false   # warnings don't fail; change to true if you prefer
+      yamllint_strict: false   # warnings don't cause failures; change to true if preferred
 
   python:
     needs: [validate]
