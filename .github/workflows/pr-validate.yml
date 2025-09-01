@@ -8,6 +8,6 @@ permissions: read-all
 
 jobs:
   validate:
-    uses: tAIness/devops-ci-lib/.github/workflows/validate.yml@v1.1.4
+    uses: tAIness/devops-ci-lib/.github/workflows/validate.yml@v1.1.5
     with:
       yamllint_strict: false
