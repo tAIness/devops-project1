@@ -1,0 +1,9 @@
+name: PR - Ping
+on:
+  pull_request:
+    branches: [ main, master ]
+permissions: read-all
+
+jobs:
+  ping:
+    uses: tAIness/ci-lib/.github/workflows/ping.yml@main
