@@ -18,7 +18,7 @@ jobs:
 
   security:
     needs: [release]
-    uses: <your-org>/ci-lib/.github/workflows/security.yml@v1.0.0
+    uses: <tAIness>/ci-lib/.github/workflows/security.yml@v1.0.0
     with:
       scan_deps: false
       scan_images: true
