@@ -12,14 +12,14 @@ jobs:
 
   python:
     needs: [validate]
-    uses: tAIness/ci-lib/.github/workflows/python-tests.yml@v1.0.0
+    uses: tAIness/ci-lib/.github/workflows/python-tests.yml@main
     with:
       workdir: app
       python_version: "3.11"
 
   web-smoke:
     needs: [validate]
-    uses: tAIness/ci-lib/.github/workflows/web-smoke.yml@v1.0.0
+    uses: tAIness/ci-lib/.github/workflows/web-smoke.yml@main
     with:
       service: front
       url: http://localhost:8080/
@@ -32,7 +32,7 @@ jobs:
 
   e2e:
     needs: [web-smoke]
-    uses: tAIness/ci-lib/.github/workflows/playwright-e2e.yml@v1.0.0
+    uses: tAIness/ci-lib/.github/workflows/playwright-e2e.yml@main
     with:
       node_version: "20"
       base_url: http://localhost:8080
