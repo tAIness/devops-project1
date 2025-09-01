@@ -4,25 +4,11 @@ on:
     branches:
       - main
       - master
-    paths:
-      - '**/requirements*.txt'
-      - '**/poetry.lock'
-      - '**/Pipfile.lock'
-      - '**/package-lock.json'
-      - '**/pnpm-lock.yaml'
-      - '**/yarn.lock'
-      - 'Dockerfile'
-      - 'Dockerfile.*'
-      - '**/*.Dockerfile'
-      - '.snyk-ignores.csv'
 permissions: read-all
 
 jobs:
-  security:
-    uses: tAIness/devops-ci-lib/.github/workflows/security.yml@v1.0.0
+  deps:
+    uses: tAIness/devops-ci-lib/.github/workflows/security.yml@v1.1.6
     with:
-      scan_deps: true
-      scan_images: false
-      severity: medium
-      soft_fail: true
-    secrets: inherit
+      mode: deps
+      soft_fail: true       # don't fail PRs; report only

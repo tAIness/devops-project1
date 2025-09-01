@@ -5,11 +5,8 @@ on:
 permissions: read-all
 
 jobs:
-  security:
-    uses: tAIness/devops-ci-lib/.github/workflows/security.yml@v1.0.0
+  deps:
+    uses: tAIness/devops-ci-lib/.github/workflows/security.yml@v1.1.6
     with:
-      scan_deps: true
-      scan_images: false
-      severity: medium
+      mode: deps
       soft_fail: false
-    secrets: inherit

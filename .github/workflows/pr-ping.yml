@@ -8,15 +8,4 @@ permissions: read-all
 
 jobs:
   ping:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Echo
-        run: echo "pong from devops-ci-lib"
-      # If you had this (yamllint hates spaces inside braces):
-      # - uses: reviewdog/action-actionlint@v1
-      #   with: { fail_on_error: true }
-      # Replace with:
-      - name: actionlint (example)
-        uses: reviewdog/action-actionlint@v1
-        with:
-          fail_on_error: true
+    uses: tAIness/devops-ci-lib/.github/workflows/ping.yml@v1.0.0

@@ -7,23 +7,4 @@ permissions: read-all
 
 jobs:
   release:
-    uses: tAIness/devops-ci-lib/.github/workflows/docker-release.yml@v1.0.0
-    with:
-      registry: docker.io
-      builds_json: >
-        [
-          {"name":"service","context":"./app","dockerfile":"Dockerfile","image_suffix":"supermario-service"},
-          {"name":"front","context":"./web","dockerfile":"Dockerfile","image_suffix":"supermario-front"}
-        ]
-    secrets: inherit
-
-  security:
-    needs: [release]
-    uses: <tAIness>/devops-ci-lib/.github/workflows/security.yml@v1.0.0
-    with:
-      scan_deps: false
-      scan_images: true
-      image_artifact: images-to-scan
-      severity: medium
-      soft_fail: true
-    secrets: inherit
+    uses: tAIness/devops-ci-lib/.github/workflows/docker-release.yml@v1.1.5
