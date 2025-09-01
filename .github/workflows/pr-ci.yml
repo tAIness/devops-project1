@@ -2,8 +2,8 @@ name: PR - CI
 on:
   pull_request:
     branches:
-      - main
-      - master
+    - main
+    - master
 permissions: read-all
 
 jobs:
@@ -14,7 +14,7 @@ jobs:
 
   python:
     needs:
-      - validate
+    - validate
     uses: tAIness/devops-ci-lib/.github/workflows/python-tests.yml@v1.2.0
     with:
       workdir: app
@@ -22,7 +22,7 @@ jobs:
 
   web-smoke:
     needs:
-      - validate
+    - validate
     uses: tAIness/devops-ci-lib/.github/workflows/web-smoke.yml@v1.2.0
     with:
       service: front
@@ -36,7 +36,7 @@ jobs:
 
   e2e:
     needs:
-      - web-smoke
+    - web-smoke
     uses: tAIness/devops-ci-lib/.github/workflows/playwright-e2e.yml@v1.2.0
     with:
       node_version: "20"

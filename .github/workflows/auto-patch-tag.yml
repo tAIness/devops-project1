@@ -2,7 +2,7 @@ name: Auto patch tag
 on:
   push:
     branches:
-      - main
+    - main
 permissions:
   contents: write
 concurrency:

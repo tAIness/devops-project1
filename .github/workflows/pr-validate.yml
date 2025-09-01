@@ -2,8 +2,8 @@ name: PR - Validate
 on:
   pull_request:
     branches:
-      - main
-      - master
+    - main
+    - master
 permissions: read-all
 
 jobs:
