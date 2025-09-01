@@ -1,7 +1,9 @@
 name: PR - Security
 on:
   pull_request:
-    branches: [ main, master ]
+    branches:
+      - main
+      - master
     paths:
       - '**/requirements*.txt'
       - '**/poetry.lock'

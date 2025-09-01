@@ -1,92 +1,29 @@
-name: Cut release tag
+name: Cut release tag (manual)
 on:
   workflow_dispatch:
     inputs:
       bump:
-        description: "SemVer bump"
+        description: patch | minor | major
         type: choice
         required: true
-        default: patch
-        options: [patch, minor, major]
-      prefix:
-        description: "Tag prefix"
-        type: string
-        default: "v"
-        required: true
-      initial_version:
-        description: "Start from (if no tags)"
-        type: string
-        default: "1.0.0"
-        required: true
-      create_github_release:
-        description: "Create a GitHub Release entry"
-        type: boolean
-        default: true
-        required: true
-
+        options:
+          - patch
+          - minor
+          - major
 permissions:
   contents: write
 
 jobs:
-  bump-and-tag:
+  cut:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout (with tags)
+      - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Cut tag
+        uses: ./.github/workflows/_cut-tag.yml   # or your reusable
         with:
-          fetch-depth: 0
-
-      - name: Compute next version
-        id: ver
-        shell: bash
-        run: |
-          set -euo pipefail
-          prefix="${{ github.event.inputs.prefix }}"
-          bump="${{ github.event.inputs.bump }}"
-          initial="${{ github.event.inputs.initial_version }}"
-
-          # find latest semver tag with prefix (v1.2.3)
-          latest="$(git tag -l "${prefix}[0-9]*.[0-9]*.[0-9]*" --sort=-v:refname | head -n1 || true)"
-          if [[ -z "$latest" ]]; then
-            base="${prefix}${initial}"
-          else
-            base="$latest"
-          fi
-
-          ver="${base#$prefix}"   # strip prefix
-          IFS='.' read -r MAJ MIN PAT <<<"$ver"
-
-          case "$bump" in
-            patch) PAT=$((PAT+1));;
-            minor) MIN=$((MIN+1)); PAT=0;;
-            major) MAJ=$((MAJ+1)); MIN=0; PAT=0;;
-            *) echo "Unknown bump: $bump" >&2; exit 1;;
-          esac
-
-          next="${prefix}${MAJ}.${MIN}.${PAT}"
-
-          echo "base=$base"   >> $GITHUB_OUTPUT
-          echo "next=$next"   >> $GITHUB_OUTPUT
-          echo "version=${MAJ}.${MIN}.${PAT}" >> $GITHUB_OUTPUT
-          echo "Next tag: $next (from $base)"
-
-      - name: Create and push tag
-        shell: bash
-        run: |
-          set -euo pipefail
-          tag="${{ steps.ver.outputs.next }}"
-          # Safety: fail if tag already exists remotely
-          if git ls-remote --tags origin | grep -q "refs/tags/${tag}$"; then
-            echo "::error::Tag ${tag} already exists on origin"; exit 1
-          fi
-
-          git tag -a "$tag" -m "Release $tag"
-          git push origin "$tag"
-          echo "Pushed $tag"
-
-      - name: Create GitHub Release (optional)
-        if: ${{ fromJSON(github.event.inputs.create_github_release) }}
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ steps.ver.outputs.next }}
-          generate_release_notes: true
+          bump: ${{ github.event.inputs.bump }}
+          prefix: v
+          initial_version: 1.0.0
+          create_github_release: true

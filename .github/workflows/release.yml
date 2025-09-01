@@ -1,7 +1,8 @@
 name: Release
 on:
   push:
-    tags: [ v*.*.* ]   # only when a version tag is pushed
+    tags:
+      - v*.*.*
 permissions: read-all
 
 jobs:

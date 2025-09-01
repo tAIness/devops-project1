@@ -1,19 +1,22 @@
 name: Auto SemVer tag
 on:
   push:
-    branches: [ main ]   # change if your default is different
+    branches:
+      - main
   workflow_dispatch:
     inputs:
       force_bump:
-        description: "Override bump (patch/minor/major); leave empty for auto"
+        description: Override bump (patch/minor/major); leave empty for auto
         type: choice
         required: false
         default: ""
-        options: ["", "patch", "minor", "major"]
-
+        options:
+          - ""
+          - patch
+          - minor
+          - major
 permissions:
   contents: write
-
 concurrency:
   group: auto-semver-${{ github.ref }}
   cancel-in-progress: false
