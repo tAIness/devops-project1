@@ -1,12 +1,13 @@
 name: Auto patch tag
 on:
   push:
-    branches: [ main ]   # fires on merges to main
+    branches:
+      - main
+permissions:
+  contents: write
 concurrency:
   group: auto-patch-${{ github.ref }}
   cancel-in-progress: false
-permissions:
-  contents: write
 
 jobs:
   cut:

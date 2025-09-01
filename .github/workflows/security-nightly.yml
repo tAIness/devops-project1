@@ -1,8 +1,7 @@
 name: Security - Nightly
 on:
   schedule:
-    - cron: '0 2 * * *'   # 02:00 UTC ≈ 05:00 Asia/Jerusalem
-  workflow_dispatch: {}
+    - cron: '0 2 * * *'
 permissions: read-all
 
 jobs:
