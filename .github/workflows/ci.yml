@@ -86,12 +86,14 @@ jobs:
         push: false
         tags: local/web:pr-check
 
-  snyk-pr:
-    uses: tAIness/devops-ci-lib/.github/workflows/snyk-reusable.yml@main
-    secrets: inherit
-    with:
-      images: |
-        alpine:3.20
-      ignore_list_path: security/ignores.txt
-      severity: high
-      upload_artifacts: true
+snyk-pr:
+  uses: tAIness/devops-ci-lib/.github/workflows/snyk-reusable.yml@main
+  secrets: inherit
+  with:
+    dockerfiles: |
+      app/Dockerfile
+      web/Dockerfile
+    # optional knobs:
+    ignore_list_path: security/ignores.txt
+    severity: high
+    upload_artifacts: true
