@@ -116,8 +116,8 @@ jobs:
     uses: tAIness/devops-ci-lib/.github/workflows/snyk-reusable.yml@main
     secrets: inherit
     with:
-      repo_app: ${{ secrets.DOCKERHUB_REPO_APP }}
-      repo_web: ${{ secrets.DOCKERHUB_REPO_WEB }}
+      repo_app: ${{ env.DOCKERHUB_REPO_APP }}
+      repo_web: ${{ env.DOCKERHUB_REPO_WEB }}
       image_tag: ${{ github.ref_type == 'tag' && github.ref_name || 'edge' }}
       ignore_list_path: security/ignores.txt
       severity: high
