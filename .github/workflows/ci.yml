@@ -69,11 +69,50 @@ jobs:
     - uses: actions/checkout@v4
 
     - uses: docker/setup-buildx-action@v3
+    - name: Debug Docker Hub creds length
+      run: |
+        echo "Username: $DOCKERHUB_USERNAME"
+        echo "Token length: ${#DOCKERHUB_TOKEN}"
+      env:
+        DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Debug Docker creds
+      run: |
+        echo "Username: '${DOCKERHUB_USERNAME}'"
+        echo "Token sha256: $(echo -n "$DOCKERHUB_TOKEN" | sha256sum | cut -c1-12)"
+        echo "Token length: ${#DOCKERHUB_TOKEN}"
+      env:
+        DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+    - name: Debug secret visibility
+      run: |
+        if [ -z "$DOCKERHUB_TOKEN" ]; then
+          echo "❌ DOCKERHUB_TOKEN is EMPTY (not available here)"
+        else
+          echo "✅ DOCKERHUB_TOKEN is set, length=${#DOCKERHUB_TOKEN}"
+        fi
+      env:
+        DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Check PAT integrity
+      run: |
+        echo "Byte length: $(echo -n "$DOCKERHUB_TOKEN" | wc -c)"
+        echo "Hex dump:"
+        echo -n "$DOCKERHUB_TOKEN" | hexdump -C
+      env:
+        DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+    - name: Manual Docker login
+      run: echo "${DOCKERHUB_TOKEN}" | docker login -u "${DOCKERHUB_USERNAME}" --password-stdin
+      env:
+        DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+        DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
     - name: Build app image (no push on PR)
       uses: docker/build-push-action@v6
       with:
-        context: .
+        context: app
         file: app/Dockerfile
         push: false
         tags: local/app:pr-check
@@ -86,13 +125,12 @@ jobs:
         push: false
         tags: local/web:pr-check
 
-snyk-pr:
-  uses: tAIness/devops-ci-lib/.github/workflows/snyk-reusable.yml@main
-  secrets: inherit
-  with:
-    dockerfiles: |
-      app/Dockerfile
-      web/Dockerfile
-    ignore_list_path: security/ignores.txt
-    severity: high
-    upload_artifacts: true
+  snyk-pr:
+    uses: tAIness/devops-ci-lib/.github/workflows/snyk-reusable.yml@main
+    secrets: inherit
+    with:
+      dockerfiles: |
+        app/Dockerfile
+        web/Dockerfile
+      severity: high
+      upload_artifacts: true

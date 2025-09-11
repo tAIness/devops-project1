@@ -1,3 +1,4 @@
+# app/Dockerfile
 FROM python:3.12-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
@@ -7,9 +8,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
+# context is app/, so drop the "app/"
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# context is app/, so this brings in your app code
 COPY . .
 EXPOSE 8000
 
