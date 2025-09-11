@@ -73,7 +73,7 @@ jobs:
     - name: Build app image (no push on PR)
       uses: docker/build-push-action@v6
       with:
-        context: .
+        context: app
         file: app/Dockerfile
         push: false
         tags: local/app:pr-check
