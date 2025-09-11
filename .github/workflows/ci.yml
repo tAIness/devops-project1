@@ -95,6 +95,14 @@ jobs:
       env:
         DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
+    - name: Check PAT integrity
+      run: |
+        echo "Byte length: $(echo -n "$DOCKERHUB_TOKEN" | wc -c)"
+        echo "Hex dump:"
+        echo -n "$DOCKERHUB_TOKEN" | hexdump -C
+      env:
+        DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
     - name: Manual Docker login
       run: echo "${DOCKERHUB_TOKEN}" | docker login -u "${DOCKERHUB_USERNAME}" --password-stdin
       env:
