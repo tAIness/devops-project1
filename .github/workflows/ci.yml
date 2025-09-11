@@ -85,6 +85,15 @@ jobs:
       env:
         DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+    - name: Debug secret visibility
+      run: |
+        if [ -z "$DOCKERHUB_TOKEN" ]; then
+          echo "❌ DOCKERHUB_TOKEN is EMPTY (not available here)"
+        else
+          echo "✅ DOCKERHUB_TOKEN is set, length=${#DOCKERHUB_TOKEN}"
+        fi
+      env:
+        DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
     - name: Manual Docker login
       run: echo "${DOCKERHUB_TOKEN}" | docker login -u "${DOCKERHUB_USERNAME}" --password-stdin
