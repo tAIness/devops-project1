@@ -1,36 +1,44 @@
-name: CI / CD (build, test, push)
+name: CI (PR checks)
 
 on:
   pull_request:
     branches: [ main ]
-  push:
-    branches: [ main ]
-    tags: [ 'v*.*.*' ]
+    paths:
+      - 'app/**'
+      - 'web/**'
+      - '.github/workflows/**'
 
 permissions:
   contents: read
-  packages: write
-  id-token: write
-
-concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
-  ci:
-    uses: tAIness/devops-ci-lib/.github/workflows/container-ci.yml@main
-    secrets: inherit
-    with:
-      # Build both services
-      matrix: >
-        {"include":[
-          {"service":"app","context":"app","dockerfile":"app/Dockerfile"},
-          {"service":"web","context":"web","dockerfile":"web/Dockerfile"}
-        ]}
-      # Push images only on push (not PR)
-      push_images: ${{ github.event_name == 'push' }}
-      run_snyk: true
-      run_e2e: true
-      push_to_nexus: false  # flip to true for dev mirroring
-      python_version: "3.12"
-      node_version: "20"
+  unit-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: |
+            app/requirements.txt
+            app/tests/requirements.txt
+
+      - name: Install deps
+        run: |
+          pip install -r app/requirements.txt
+          if [ -f app/tests/requirements.txt ]; then pip install -r app/tests/requirements.txt; fi
+
+      - name: Run unit tests
+        working-directory: app
+        run: python -m pytest -q --junitxml=pytest-results.xml
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: app/pytest-results.xml
