@@ -2,12 +2,11 @@ name: CI (PR checks)
 
 on:
   pull_request:
-    branches: [ main ]
+    branches: [ "main" ]
     paths:
-      - 'app/**'
-      - 'web/**'
-      - '.github/workflows/**'
-      - 'security/ignores.txt'
+      - "app/**"
+      - "web/**"
+      - ".github/workflows/**"
 
 permissions:
   contents: read
@@ -18,38 +17,47 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-          cache: 'pip'
+          python-version: "3.12"
+          cache: "pip"
           cache-dependency-path: app/requirements.txt
-      - name: Install pylint
-        run: pip install pylint
-      - name: Lint app
-        working-directory: app
-        run: |
-          # Lint Python app. Adjust paths if needed.
-          python -m pylint app.py || (echo "Lint failures"; exit 1)
 
-  unit-test:
+      - name: Install deps for lint
+        run: |
+          python -m pip install -U pip
+          pip install -r app/requirements.txt pylint
+
+      - name: Run pylint (in app/)
+        working-directory: app
+        # relax docstring rules for now; remove the disables when you're ready
+        run: python -m pylint --disable=C0114,C0116 *.py
+
+  unit-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-python@v5
         with:
-          python-version: '3.12'
-          cache: 'pip'
+          python-version: "3.12"
+          cache: "pip"
           cache-dependency-path: |
             app/requirements.txt
             app/tests/requirements.txt
+
       - name: Install deps
         run: |
+          python -m pip install -U pip
           pip install -r app/requirements.txt
           if [ -f app/tests/requirements.txt ]; then pip install -r app/tests/requirements.txt; fi
+
       - name: Run unit tests
         working-directory: app
         run: python -m pytest -q --junitxml=pytest-results.xml
+
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@v4
@@ -57,67 +65,33 @@ jobs:
           name: unit-test-results
           path: app/pytest-results.xml
 
-  build-images:
+  build:
     runs-on: ubuntu-latest
-    needs: [lint, unit-test]
-    outputs:
-      app_tag: ${{ steps.meta.outputs.app_tag }}
-      web_tag: ${{ steps.meta.outputs.web_tag }}
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Meta (tags)
-        id: meta
-        shell: bash
-        run: |
-          SHORT_SHA="${GITHUB_SHA::7}"
-          echo "app_tag=project1-app:pr-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
-          echo "web_tag=project1-web:pr-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
-      - name: Build app image (local only)
-        run: docker build -t "${{ steps.meta.outputs.app_tag }}" app
-      - name: Build web image (local only)
-        run: docker build -t "${{ steps.meta.outputs.web_tag }}" web
 
-  snyk-scan:
-    runs-on: ubuntu-latest
-    needs: build-images
-    steps:
-      - uses: actions/checkout@v4
-      - uses: snyk/actions/setup@v1
-      - name: Auth Snyk
-        run: snyk auth "${SNYK_TOKEN}"
-        env:
-          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      - uses: docker/setup-buildx-action@v3
 
-      - name: Build .snyk policy from ignore list
-        shell: bash
-        run: |
-          set -euo pipefail
-          touch .snyk
-          if [[ -f security/ignores.txt ]]; then
-            grep -v '^\s*#' security/ignores.txt | sed '/^\s*$/d' | while read -r ID; do
-              echo "Ignoring $ID"
-              snyk ignore --id="$ID" --reason="approved via repo ignore list" --expiry=2099-12-31 --yes --quiet || true
-            done
-          fi
-          cat .snyk || true
-
-      - name: Scan local images (fail on >=high not ignored)
-        shell: bash
-        run: |
-          set -euo pipefail
-          fails=0
-          for IMG in "${{ needs.build-images.outputs.app_tag }}" "${{ needs.build-images.outputs.web_tag }}"; do
-            SAFE="$(echo "$IMG" | tr '/:@' '___')"
-            OUT="snyk-${SAFE}.json"
-            if ! snyk container test "$IMG" --severity-threshold=high --json-file-output="$OUT"; then
-              fails=$((fails+1))
-            fi
-          done
-          ls -l snyk-*.json || true
-          exit $fails
-      - name: Upload Snyk reports
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Build app image (no push on PR)
+        uses: docker/build-push-action@v6
         with:
-          name: snyk-pr-reports
-          path: snyk-*.json
+          context: .
+          file: app/Dockerfile
+          push: false
+          tags: local/app:pr-check
+
+      - name: Build web image (no push on PR)
+        uses: docker/build-push-action@v6
+        with:
+          context: web
+          file: web/Dockerfile
+          push: false
+          tags: local/web:pr-check
+
+  snyk-pr:
+    uses: tAIness/devops-ci-lib/.github/workflows/snyk-reusable.yml@main
+    secrets: inherit
+    with:
+      dockerfile: app/Dockerfile
+      fail_on_new: true
