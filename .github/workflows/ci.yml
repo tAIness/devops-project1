@@ -71,8 +71,8 @@ jobs:
     - uses: docker/setup-buildx-action@v3
     - name: Debug Docker Hub creds length
       run: |
-       echo "Username length: ${#DOCKERHUB_USERNAME}"
-       echo "Token length: ${#DOCKERHUB_TOKEN}"
+        echo "Username: $DOCKERHUB_USERNAME"
+        echo "Token length: ${#DOCKERHUB_TOKEN}"
       env:
         DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
