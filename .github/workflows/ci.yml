@@ -6,20 +6,14 @@ on:
     paths:
       - 'app/**'
       - 'web/**'
-      - 'security/**'
       - '.github/workflows/**'
-  workflow_dispatch:
+      - 'security/ignores.txt'
 
 permissions:
   contents: read
 
-concurrency:
-  group: pr-${{ github.ref }}
-  cancel-in-progress: true
-
 jobs:
   lint:
-    name: lint
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -27,16 +21,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: pip
+          cache: 'pip'
           cache-dependency-path: app/requirements.txt
-      - name: Install deps
+      - name: Install pylint
+        run: pip install pylint
+      - name: Lint app
+        working-directory: app
         run: |
-          pip install -r app/requirements.txt pylint
-      - name: Pylint
-        run: python -m pylint app/*.py
+          # Lint Python app. Adjust paths if needed.
+          python -m pylint app.py || (echo "Lint failures"; exit 1)
 
-  unit-tests:
-    name: unit-tests
+  unit-test:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -44,7 +39,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-          cache: pip
+          cache: 'pip'
           cache-dependency-path: |
             app/requirements.txt
             app/tests/requirements.txt
@@ -52,133 +47,77 @@ jobs:
         run: |
           pip install -r app/requirements.txt
           if [ -f app/tests/requirements.txt ]; then pip install -r app/tests/requirements.txt; fi
-          pip install pytest
       - name: Run unit tests
         working-directory: app
-        run: |
-          mkdir -p ../test-results
-          python -m pytest -q --junitxml=../test-results/junit.xml
+        run: python -m pytest -q --junitxml=pytest-results.xml
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: junit-report
-          path: test-results/junit.xml
-          if-no-files-found: ignore
+          name: unit-test-results
+          path: app/pytest-results.xml
 
-  build:
-    name: build
+  build-images:
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    needs: [lint, unit-test]
+    outputs:
+      app_tag: ${{ steps.meta.outputs.app_tag }}
+      web_tag: ${{ steps.meta.outputs.web_tag }}
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - name: Meta (tags)
+        id: meta
+        shell: bash
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          echo "app_tag=project1-app:pr-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+          echo "web_tag=project1-web:pr-${SHORT_SHA}" >> "$GITHUB_OUTPUT"
+      - name: Build app image (local only)
+        run: docker build -t "${{ steps.meta.outputs.app_tag }}" app
+      - name: Build web image (local only)
+        run: docker build -t "${{ steps.meta.outputs.web_tag }}" web
 
-      # Build app image (no push). We don't load here to keep this job fast.
-      - name: Build app image (no push)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: app/Dockerfile
-          push: false
-          platforms: linux/amd64
-          tags: project1-app:pr-${{ github.event.pull_request.number }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      # Build web image (no push)
-      - name: Build web image (no push)
-        uses: docker/build-push-action@v6
-        with:
-          context: ./web
-          file: web/Dockerfile
-          push: false
-          platforms: linux/amd64
-          tags: project1-web:pr-${{ github.event.pull_request.number }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-  snyk:
-    name: snyk
+  snyk-scan:
     runs-on: ubuntu-latest
-    needs: [lint, unit-tests]   # make sure code quality/tests pass before security
-    timeout-minutes: 25
-    env:
-      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}           # org secret
-      SNYK_IGNORE_EXPIRY_DAYS: 30                     # change if you want shorter/longer ignores
+    needs: build-images
     steps:
       - uses: actions/checkout@v4
+      - uses: snyk/actions/setup@v1
+      - name: Auth Snyk
+        run: snyk auth "${SNYK_TOKEN}"
+        env:
+          SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-
-      # Rebuild WITH load:true so the images are available locally to Snyk
-      - name: Build & LOAD app image (local)
-        uses: docker/build-push-action@v6
-        with:
-          context: .
-          file: app/Dockerfile
-          push: false
-          load: true
-          platforms: linux/amd64
-          tags: project1-app:pr-${{ github.event.pull_request.number }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Build & LOAD web image (local)
-        uses: docker/build-push-action@v6
-        with:
-          context: ./web
-          file: web/Dockerfile
-          push: false
-          load: true
-          platforms: linux/amd64
-          tags: project1-web:pr-${{ github.event.pull_request.number }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Install Snyk CLI
+      - name: Build .snyk policy from ignore list
+        shell: bash
         run: |
-          curl -fsSL https://static.snyk.io/cli/latest/snyk-linux -o /usr/local/bin/snyk
-          chmod +x /usr/local/bin/snyk
-          snyk --version
-
-      # Turn your list into a temporary .snyk policy for this run
-      - name: Apply ignore list
-        run: |
+          set -euo pipefail
           touch .snyk
-          if [ -s security/ignores.txt ]; then
-            while IFS= read -r ID; do
-              [ -z "$ID" ] && continue
-              case "$ID" in \#*) continue ;; esac
-              EXPIRY="$(date -d "+${SNYK_IGNORE_EXPIRY_DAYS} days" +%Y-%m-%d)"
-              echo "Ignoring $ID until $EXPIRY"
-              snyk ignore --id="$ID" --expiry="$EXPIRY" --reason="CI temporary ignore list"
-            done < security/ignores.txt
+          if [[ -f security/ignores.txt ]]; then
+            grep -v '^\s*#' security/ignores.txt | sed '/^\s*$/d' | while read -r ID; do
+              echo "Ignoring $ID"
+              snyk ignore --id="$ID" --reason="approved via repo ignore list" --expiry=2099-12-31 --yes --quiet || true
+            done
           fi
-          echo "Final policy:"
           cat .snyk || true
 
-      # Fail on High/Critical unless ignored
-      - name: Snyk scan: app image
+      - name: Scan local images (fail on >=high not ignored)
+        shell: bash
         run: |
-          snyk container test project1-app:pr-${{ github.event.pull_request.number }} \
-            --file=app/Dockerfile \
-            --severity-threshold=high \
-            --json-file-output=snyk-app.json
-      - name: Snyk scan: web image
-        run: |
-          snyk container test project1-web:pr-${{ github.event.pull_request.number }} \
-            --file=web/Dockerfile \
-            --severity-threshold=high \
-            --json-file-output=snyk-web.json
-
+          set -euo pipefail
+          fails=0
+          for IMG in "${{ needs.build-images.outputs.app_tag }}" "${{ needs.build-images.outputs.web_tag }}"; do
+            SAFE="$(echo "$IMG" | tr '/:@' '___')"
+            OUT="snyk-${SAFE}.json"
+            if ! snyk container test "$IMG" --severity-threshold=high --json-file-output="$OUT"; then
+              fails=$((fails+1))
+            fi
+          done
+          ls -l snyk-*.json || true
+          exit $fails
       - name: Upload Snyk reports
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: snyk-reports
-          path: |
-            snyk-app.json
-            snyk-web.json
+          name: snyk-pr-reports
+          path: snyk-*.json

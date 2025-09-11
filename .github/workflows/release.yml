@@ -1,4 +1,4 @@
-name: Release (tag, build, push, secure)
+name: Release (build & push & scan)
 
 on:
   push:
@@ -7,141 +7,79 @@ on:
       - 'app/**'
       - 'web/**'
       - '.github/workflows/**'
-  workflow_dispatch:
 
 permissions:
-  contents: write   # we create/push a git tag
-  packages: write
+  contents: read
 
 env:
-  DOCKERHUB_ORG: ${{ secrets.DOCKERHUB_USERNAME }}
-  NEXUS_REGISTRY: ${{ secrets.NEXUS_REGISTRY_HOST }}
+  IMAGE_NS: ${{ secrets.DOCKERHUB_USERNAME }}   # docker.io/<username>/
 
 jobs:
-  compute-version:
+  build-and-push:
     runs-on: ubuntu-latest
     outputs:
-      version: ${{ steps.ver.outputs.version }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - id: ver
-        name: Bump patch version from last tag
-        run: |
-          latest=$(git describe --tags --abbrev=0 2>/dev/null || echo "v0.0.0")
-          latest=${latest#v}
-          IFS='.' read -r MA MI PA <<<"$latest"
-          : $((PA=PA+1))
-          new="${MA}.${MI}.${PA}"
-          echo "version=$new" >> $GITHUB_OUTPUT
-          echo "Next version: $new"
-
-      - name: Create & push git tag
-        run: |
-          v="v${{ steps.ver.outputs.version }}"
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git tag -a "$v" -m "Release $v"
-          git push origin "$v"
-
-  build-and-push:
-    needs: compute-version
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
-    strategy:
-      matrix:
-        component: [app, web]
-        include:
-          - component: app
-            context: app
-            dockerfile: app/Dockerfile
-          - component: web
-            context: web
-            dockerfile: web/Dockerfile
+      version: ${{ steps.meta.outputs.version }}
     steps:
       - uses: actions/checkout@v4
 
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
+      - name: Meta (version/tag)
+        id: meta
+        run: |
+          SHORT_SHA="${GITHUB_SHA::7}"
+          echo "version=${SHORT_SHA}" >> "$GITHUB_OUTPUT"
 
-      - name: Login to Docker Hub
+      - name: Docker login (Docker Hub)
         uses: docker/login-action@v3
         with:
-          registry: docker.io
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Login to Nexus
-        uses: docker/login-action@v3
-        with:
-          registry: ${{ env.NEXUS_REGISTRY }}
-          username: ${{ secrets.NEXUS_USERNAME }}
-          password: ${{ secrets.NEXUS_PASSWORD }}
-
-      - name: Build & push (Docker Hub + Nexus)
-        uses: docker/build-push-action@v6
-        with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
-          push: true
-          tags: |
-            docker.io/${{ env.DOCKERHUB_ORG }}/project1-${{ matrix.component }}:${{ needs.compute-version.outputs.version }}
-            docker.io/${{ env.DOCKERHUB_ORG }}/project1-${{ matrix.component }}:latest
-            ${{ env.NEXUS_REGISTRY }}/project1-${{ matrix.component }}:${{ needs.compute-version.outputs.version }}
-            ${{ env.NEXUS_REGISTRY }}/project1-${{ matrix.component }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Export images for downstream jobs
+      - name: Build & push app
         run: |
-          ver="${{ needs.compute-version.outputs.version }}"
-          {
-            echo "docker.io/${{ env.DOCKERHUB_ORG }}/project1-${{ matrix.component }}:${ver}"
-            echo "${{ env.NEXUS_REGISTRY }}/project1-${{ matrix.component }}:${ver}"
-          } >> images-${{ matrix.component }}.txt
+          V="${{ steps.meta.outputs.version }}"
+          docker build -t "docker.io/${{ env.IMAGE_NS }}/project1-app:${V}" -t "docker.io/${{ env.IMAGE_NS }}/project1-app:latest" app
+          docker push "docker.io/${{ env.IMAGE_NS }}/project1-app:${V}"
+          docker push "docker.io/${{ env.IMAGE_NS }}/project1-app:latest"
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: images-${{ matrix.component }}
-          path: images-${{ matrix.component }}.txt
+      - name: Build & push web
+        run: |
+          V="${{ steps.meta.outputs.version }}"
+          docker build -t "docker.io/${{ env.IMAGE_NS }}/project1-web:${V}" -t "docker.io/${{ env.IMAGE_NS }}/project1-web:latest" web
+          docker push "docker.io/${{ env.IMAGE_NS }}/project1-web:${V}"
+          docker push "docker.io/${{ env.IMAGE_NS }}/project1-web:latest"
 
-  sbom:
-    needs: [compute-version, build-and-push]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Generate SBOM for app
-        uses: anchore/syft-action@v0
-        with:
-          image: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/project1-app:${{ needs.compute-version.outputs.version }}
-          format: spdx-json
-          output: sbom-app.spdx.json
-      - name: Generate SBOM for web
-        uses: anchore/syft-action@v0
-        with:
-          image: docker.io/${{ secrets.DOCKERHUB_USERNAME }}/project1-web:${{ needs.compute-version.outputs.version }}
-          format: spdx-json
-          output: sbom-web.spdx.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: sboms
-          path: |
-            sbom-app.spdx.json
-            sbom-web.spdx.json
+      # (Optional) Also push to Nexus (dev-only). Set these secrets if you want it.
+      - name: Login to Nexus (optional)
+        if: ${{ secrets.NEXUS_REGISTRY && secrets.NEXUS_USERNAME && secrets.NEXUS_PASSWORD }}
+        run: |
+          echo "${{ secrets.NEXUS_PASSWORD }}" | docker login "${{ secrets.NEXUS_REGISTRY }}" -u "${{ secrets.NEXUS_USERNAME }}" --password-stdin
+      - name: Push to Nexus (optional)
+        if: ${{ secrets.NEXUS_REGISTRY && secrets.NEXUS_USERNAME && secrets.NEXUS_PASSWORD }}
+        run: |
+          V="${{ steps.meta.outputs.version }}"
+          docker tag "docker.io/${{ env.IMAGE_NS }}/project1-app:${V}"     "${{ secrets.NEXUS_REGISTRY }}/project1-app:${V}"
+          docker tag "docker.io/${{ env.IMAGE_NS }}/project1-app:latest"   "${{ secrets.NEXUS_REGISTRY }}/project1-app:latest"
+          docker tag "docker.io/${{ env.IMAGE_NS }}/project1-web:${V}"     "${{ secrets.NEXUS_REGISTRY }}/project1-web:${V}"
+          docker tag "docker.io/${{ env.IMAGE_NS }}/project1-web:latest"   "${{ secrets.NEXUS_REGISTRY }}/project1-web:latest"
+          docker push "${{ secrets.NEXUS_REGISTRY }}/project1-app:${V}"
+          docker push "${{ secrets.NEXUS_REGISTRY }}/project1-app:latest"
+          docker push "${{ secrets.NEXUS_REGISTRY }}/project1-web:${V}"
+          docker push "${{ secrets.NEXUS_REGISTRY }}/project1-web:latest"
 
-  snyk-scan:
-    needs: [compute-version, build-and-push]
-    uses: tAIness/devops-ci-lib/.github/workflows/snyk-ignores.yml@main
+  snyk-after-push:
+    name: Snyk scan (registry images)
+    needs: build-and-push
+    uses: tAIness/devops-ci-lib/.github/workflows/snyk-reusable.yml@main
     with:
       images: |
-        docker.io/${{ secrets.DOCKERHUB_USERNAME }}/project1-app:${{ needs.compute-version.outputs.version }}
-        docker.io/${{ secrets.DOCKERHUB_USERNAME }}/project1-web:${{ needs.compute-version.outputs.version }}
-      ignore_file: security/ignores.txt
+        docker.io/${{ secrets.DOCKERHUB_USERNAME }}/project1-app:${{ needs.build-and-push.outputs.version }}
+        docker.io/${{ secrets.DOCKERHUB_USERNAME }}/project1-web:${{ needs.build-and-push.outputs.version }}
+        docker.io/${{ secrets.DOCKERHUB_USERNAME }}/project1-app:latest
+        docker.io/${{ secrets.DOCKERHUB_USERNAME }}/project1-web:latest
+      ignore_list_path: security/ignores.txt
+      severity: high
+      upload_artifacts: true
     secrets:
-      snyk_token: ${{ secrets.SNYK_TOKEN }}
-      dockerhub_username: ${{ secrets.DOCKERHUB_USERNAME }}
-      dockerhub_token: ${{ secrets.DOCKERHUB_TOKEN }}
-      nexus_registry: ${{ secrets.NEXUS_REGISTRY_HOST }}
-      nexus_username: ${{ secrets.NEXUS_USERNAME }}
-      nexus_password: ${{ secrets.NEXUS_PASSWORD }}
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+      DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
