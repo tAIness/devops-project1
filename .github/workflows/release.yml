@@ -116,8 +116,8 @@ jobs:
     secrets: inherit
     with:
       images: |
-        ${{ env.DOCKERHUB_REPO_APP }}:${{ env.IMAGE_TAG }}
-        ${{ env.DOCKERHUB_REPO_WEB }}:${{ env.IMAGE_TAG }}
+        ${{ secrets.DOCKERHUB_REPO_APP }}:${{ github.ref_type == 'tag' && github.ref_name || 'edge' }}
+        ${{ secrets.DOCKERHUB_REPO_WEB }}:${{ github.ref_type == 'tag' && github.ref_name || 'edge' }}
       ignore_list_path: security/ignores.txt
       severity: high
       upload_artifacts: true
