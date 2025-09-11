@@ -1,3 +1,5 @@
+# yamllint disable rule:line-length
+---
 name: Release
 
 on:
@@ -13,7 +15,6 @@ permissions:
   packages: write
 
 env:
-  # single place to compute the tag:
   IMAGE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || 'edge' }}
 
 jobs:
@@ -115,9 +116,9 @@ jobs:
     uses: tAIness/devops-ci-lib/.github/workflows/snyk-reusable.yml@main
     secrets: inherit
     with:
-      images: |
-        ${{ secrets.DOCKERHUB_REPO_APP }}:${{ github.ref_type == 'tag' && github.ref_name || 'edge' }}
-        ${{ secrets.DOCKERHUB_REPO_WEB }}:${{ github.ref_type == 'tag' && github.ref_name || 'edge' }}
+      repo_app: ${{ env.DOCKERHUB_REPO_APP }}
+      repo_web: ${{ env.DOCKERHUB_REPO_WEB }}
+      image_tag: ${{ github.ref_type == 'tag' && github.ref_name || 'edge' }}
       ignore_list_path: security/ignores.txt
       severity: high
       upload_artifacts: true
