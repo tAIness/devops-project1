@@ -1,0 +1,49 @@
+name: Deploy (manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        type: choice
+        options: [dev, prod]
+        default: dev
+      app_tag:
+        description: Image tag for app (e.g. latest or v1.2.3)
+        default: latest
+      web_tag:
+        description: Image tag for web
+        default: latest
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: SSH deploy
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.DEPLOY_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_KEY }}
+          script: |
+            set -euo pipefail
+            docker login -u "${DOCKERHUB_USERNAME}" -p "${DOCKERHUB_TOKEN}"
+            APP_IMG="${DOCKERHUB_USERNAME}/${REPO}-app:${{ inputs.app_tag }}"
+            WEB_IMG="${DOCKERHUB_USERNAME}/${REPO}-web:${{ inputs.web_tag }}"
+            echo "Using $APP_IMG and $WEB_IMG"
+
+            docker pull "docker.io/${APP_IMG}"
+            docker pull "docker.io/${WEB_IMG}"
+
+            # Override compose images at runtime
+            DOCKERHUB_USERNAME="${DOCKERHUB_USERNAME}" \
+            yq -i '.services.app.image=env(DOCKERHUB_USERNAME)+"/"+env(REPO)+"-app":"${{ inputs.app_tag }}"' docker-compose.yml
+            DOCKERHUB_USERNAME="${DOCKERHUB_USERNAME}" \
+            yq -i '.services.web.image=env(DOCKERHUB_USERNAME)+"/"+env(REPO)+"-web":"${{ inputs.web_tag }}"' docker-compose.yml
+
+            docker compose up -d
+        env:
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          REPO: devops-project1

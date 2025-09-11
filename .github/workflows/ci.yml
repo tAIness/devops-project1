@@ -1,7 +1,10 @@
-name: Release (tags only)
+name: CI / CD (build, test, push)
 
 on:
+  pull_request:
+    branches: [ main ]
   push:
+    branches: [ main ]
     tags: [ 'v*.*.*' ]
 
 permissions:
@@ -9,17 +12,25 @@ permissions:
   packages: write
   id-token: write
 
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
-  release:
+  ci:
     uses: tAIness/devops-ci-lib/.github/workflows/container-ci.yml@main
     secrets: inherit
     with:
+      # Build both services
       matrix: >
         {"include":[
           {"service":"app","context":"app","dockerfile":"app/Dockerfile"},
           {"service":"web","context":"web","dockerfile":"web/Dockerfile"}
         ]}
-      push_images: true
+      # Push images only on push (not PR)
+      push_images: ${{ github.event_name == 'push' }}
       run_snyk: true
       run_e2e: true
-      push_to_nexus: false
+      push_to_nexus: false  # flip to true for dev mirroring
+      python_version: "3.12"
+      node_version: "20"

@@ -1,0 +1,15 @@
+# Node
+node_modules/
+
+# Playwright / test outputs
+playwright-report/
+test-results/
+blob-report/
+
+# Python caches
+__pycache__/
+.pytest_cache/
+*.py[cod]
+
+# OS/editor
+.DS_Store

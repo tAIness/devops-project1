@@ -1,6 +1,9 @@
 # web/Dockerfile
 FROM nginx:alpine
 
+# add curl for healthcheck
+RUN apk add --no-cache curl
+
 # Set web root and config locations
 ENV WEB_ROOT=/usr/share/nginx/html
 

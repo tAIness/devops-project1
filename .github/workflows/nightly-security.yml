@@ -1,16 +1,12 @@
-name: Release (tags only)
+name: Nightly Container Security
 
 on:
-  push:
-    tags: [ 'v*.*.*' ]
-
-permissions:
-  contents: read
-  packages: write
-  id-token: write
+  schedule:
+    - cron: "17 2 * * *"   # daily ~02:17 UTC
+  workflow_dispatch:
 
 jobs:
-  release:
+  nightly:
     uses: tAIness/devops-ci-lib/.github/workflows/container-ci.yml@main
     secrets: inherit
     with:
@@ -19,7 +15,6 @@ jobs:
           {"service":"app","context":"app","dockerfile":"app/Dockerfile"},
           {"service":"web","context":"web","dockerfile":"web/Dockerfile"}
         ]}
-      push_images: true
+      push_images: false
       run_snyk: true
-      run_e2e: true
-      push_to_nexus: false
+      run_e2e: false
