@@ -93,7 +93,6 @@ snyk-pr:
     dockerfiles: |
       app/Dockerfile
       web/Dockerfile
-    # optional knobs:
     ignore_list_path: security/ignores.txt
     severity: high
     upload_artifacts: true
