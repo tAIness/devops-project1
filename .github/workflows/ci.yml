@@ -83,9 +83,10 @@ jobs:
         DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
         DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
-    - name: Debug Docker Hub creds length
+    - name: Debug Docker creds
       run: |
-        echo "Username length: ${#DOCKERHUB_USERNAME}"
+        echo "Username: '${DOCKERHUB_USERNAME}'"
+        echo "Token sha256: $(echo -n "$DOCKERHUB_TOKEN" | sha256sum | cut -c1-12)"
         echo "Token length: ${#DOCKERHUB_TOKEN}"
       env:
         DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
