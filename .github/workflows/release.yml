@@ -243,13 +243,10 @@ jobs:
   deploy-ec2:
     name: Deploy to EC2 (Hub/Nexus)
     runs-on: ubuntu-latest
-    needs:
-      - build-and-push-app
-      - build-and-push-web
-      - snyk-release
+    needs: [setup, build-and-push-app, build-and-push-web, snyk-release]
     if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') }}
     env:
-      TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
+      TAG: ${{ needs.setup.outputs.IMAGE_TAG }}  # ← gets the computed tag
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -257,21 +254,8 @@ jobs:
       - name: Verify deploy payload exists
         shell: bash
         run: |
-          echo "Repo root:"; ls -lah
-          echo "deploy/:"; ls -lah deploy || true
-          echo "content/images/:"; ls -lah content/images || true
+          echo "TAG to deploy: ${{ needs.setup.outputs.IMAGE_TAG }}"
           test -f deploy/compose.yml
-
-      - name: Prepare target dir on EC2
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          script: |
-            set -e
-            sudo mkdir -p /srv/supermario
-            sudo chown -R $USER:$USER /srv/supermario
 
       - name: Upload compose.yml
         uses: appleboy/scp-action@v0.1.7
@@ -279,8 +263,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: |
-            deploy/compose.yml
+          source: deploy/compose.yml
           target: /srv/supermario
           strip_components: 1
 
@@ -291,49 +274,38 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          source: |
-            content/images/**
+          source: content/images/**
           target: /srv/supermario
-          strip_components: 1
-
-      - name: Check required secrets presence
-        run: |
-          echo "Hub username set? $([[ -n '${{ secrets.DOCKERHUB_USERNAME }}' ]] && echo yes || echo NO)"
-          echo "Hub token set?    $([[ -n '${{ secrets.DOCKERHUB_TOKEN }}' ]] && echo yes || echo NO)"
-          echo "Hub repos set?    $([[ -n '${{ secrets.DOCKERHUB_REPO_APP }}' && -n '${{ secrets.DOCKERHUB_REPO_WEB }}' ]] && echo yes || echo NO)"
-          echo "EC2 host/user/key present? $([[ -n '${{ secrets.EC2_HOST }}' && -n '${{ secrets.EC2_USER }}' && -n '${{ secrets.EC2_SSH_KEY }}' ]] && echo yes || echo NO)"
 
       - name: Deploy on EC2
         uses: appleboy/ssh-action@v1.0.3
         env:
           TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
-          # Docker Hub
           DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
           DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           DH_REPO_APP: ${{ secrets.DOCKERHUB_REPO_APP }}
           DH_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}
-          # Nexus (if you use it)
           NEXUS_DOMAIN: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}
           NEXUS_USER: ${{ secrets.NEXUS_USERNAME }}
           NEXUS_PASS: ${{ secrets.NEXUS_PASSWORD }}
           NEXUS_REPO_APP: ${{ secrets.NEXUS_REPO_APP }}
           NEXUS_REPO_WEB: ${{ secrets.NEXUS_REPO_WEB }}
-          # choose 'hub' (default) or 'nexus'
-          DEPLOY_REGISTRY: ${{ secrets.DEPLOY_REGISTRY }}
+          DEPLOY_REGISTRY: ${{ secrets.DEPLOY_REGISTRY }}  # 'hub' or 'nexus'
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          # port: ${{ secrets.EC2_PORT }}  # uncomment if you store a custom port
-          # Forward ONLY the vars we need to the remote session:
-          envs: >
-            TAG,DH_USER,DH_TOKEN,DH_REPO_APP,DH_REPO_WEB,
-            NEXUS_DOMAIN,NEXUS_USER,NEXUS_PASS,NEXUS_REPO_APP,NEXUS_REPO_WEB,
-            DEPLOY_REGISTRY
+          envs: TAG,DH_USER,DH_TOKEN,DH_REPO_APP,DH_REPO_WEB,NEXUS_DOMAIN,NEXUS_USER,NEXUS_PASS,NEXUS_REPO_APP,NEXUS_REPO_WEB,DEPLOY_REGISTRY
           script: |
             set -eo pipefail
             sudo mkdir -p /srv/supermario/content/images
             cd /srv/supermario
+
+            # Guard against empty tag
+            if [ -z "${TAG:-}" ]; then
+              echo "ERROR: TAG is empty. Refuse to deploy." >&2
+              exit 1
+            fi
 
             REG="${DEPLOY_REGISTRY:-hub}"
             if [ "$REG" = "nexus" ]; then
@@ -352,6 +324,3 @@ jobs:
             echo "Pulling ${IMAGE_REPO_APP}:${TAG} and ${IMAGE_REPO_WEB}:${TAG}…"
             sudo docker pull "${IMAGE_REPO_APP}:${TAG}"
             sudo docker pull "${IMAGE_REPO_WEB}:${TAG}"
-            sudo docker compose -f compose.yml pull
-            sudo docker compose -f compose.yml up -d --no-build
-            sudo docker image prune -f
