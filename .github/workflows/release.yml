@@ -1,7 +1,6 @@
 # yamllint disable rule:line-length rule:indentation
 ---
-# yamllint disable rule:line-length
----
+
 name: Release
 
 on:
