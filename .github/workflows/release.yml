@@ -307,41 +307,40 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         env:
           TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
+          # Docker Hub
           DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
           DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           DH_REPO_APP: ${{ secrets.DOCKERHUB_REPO_APP }}
           DH_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}
+          # Nexus (if you use it)
           NEXUS_DOMAIN: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}
           NEXUS_USER: ${{ secrets.NEXUS_USERNAME }}
           NEXUS_PASS: ${{ secrets.NEXUS_PASSWORD }}
           NEXUS_REPO_APP: ${{ secrets.NEXUS_REPO_APP }}
           NEXUS_REPO_WEB: ${{ secrets.NEXUS_REPO_WEB }}
-          DEPLOY_REGISTRY: ${{ secrets.DEPLOY_REGISTRY }} # "hub" or "nexus"
+          # choose 'hub' (default) or 'nexus'
+          DEPLOY_REGISTRY: ${{ secrets.DEPLOY_REGISTRY }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
+          # port: ${{ secrets.EC2_PORT }}  # uncomment if you store a custom port
+          # Forward ONLY the vars we need to the remote session:
+          envs: >
+            TAG,DH_USER,DH_TOKEN,DH_REPO_APP,DH_REPO_WEB,
+            NEXUS_DOMAIN,NEXUS_USER,NEXUS_PASS,NEXUS_REPO_APP,NEXUS_REPO_WEB,
+            DEPLOY_REGISTRY
           script: |
             set -eo pipefail
             sudo mkdir -p /srv/supermario/content/images
             cd /srv/supermario
 
             REG="${DEPLOY_REGISTRY:-hub}"
-
             if [ "$REG" = "nexus" ]; then
-              : "${NEXUS_DOMAIN:?Set secret NEXUS_REGISTRY_DOMAIN}"
-              : "${NEXUS_USER:?Set secret NEXUS_USERNAME}"
-              : "${NEXUS_PASS:?Set secret NEXUS_PASSWORD}"
-              : "${NEXUS_REPO_APP:?Set secret NEXUS_REPO_APP}"
-              : "${NEXUS_REPO_WEB:?Set secret NEXUS_REPO_WEB}"
               echo "${NEXUS_PASS}" | sudo docker login "${NEXUS_DOMAIN}" -u "${NEXUS_USER}" --password-stdin
               IMAGE_REPO_APP="${NEXUS_REPO_APP}"
               IMAGE_REPO_WEB="${NEXUS_REPO_WEB}"
             else
-              : "${DH_USER:?Set secret DOCKERHUB_USERNAME}"
-              : "${DH_TOKEN:?Set secret DOCKERHUB_TOKEN}"
-              : "${DH_REPO_APP:?Set secret DOCKERHUB_REPO_APP}"
-              : "${DH_REPO_WEB:?Set secret DOCKERHUB_REPO_WEB}"
               echo "${DH_TOKEN}" | sudo docker login -u "${DH_USER}" --password-stdin
               IMAGE_REPO_APP="${DH_REPO_APP}"
               IMAGE_REPO_WEB="${DH_REPO_WEB}"
@@ -353,7 +352,6 @@ jobs:
             echo "Pulling ${IMAGE_REPO_APP}:${TAG} and ${IMAGE_REPO_WEB}:${TAG}…"
             sudo docker pull "${IMAGE_REPO_APP}:${TAG}"
             sudo docker pull "${IMAGE_REPO_WEB}:${TAG}"
-
             sudo docker compose -f compose.yml pull
             sudo docker compose -f compose.yml up -d --no-build
             sudo docker image prune -f
