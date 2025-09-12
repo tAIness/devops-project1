@@ -1,5 +1,4 @@
 # yamllint disable rule:line-length rule:indentation
-
 ---
 name: Release
 
@@ -45,7 +44,7 @@ jobs:
           tag="v${major}.${minor}.${patch}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
 
-          git config user.name  "github-actions"
+          git config user.name "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
           git tag -a "$tag" -m "Release $tag"
           git push origin "$tag"
@@ -116,7 +115,7 @@ jobs:
         run: |
           set -euo pipefail
           docker pull "${DOCKERHUB_REPO_APP}:${IMAGE_TAG}"
-          docker tag  "${DOCKERHUB_REPO_APP}:${IMAGE_TAG}" "${NEXUS_REGISTRY_DOMAIN}/devops-app:${IMAGE_TAG}"
+          docker tag "${DOCKERHUB_REPO_APP}:${IMAGE_TAG}" "${NEXUS_REGISTRY_DOMAIN}/devops-app:${IMAGE_TAG}"
           docker push "${NEXUS_REGISTRY_DOMAIN}/devops-app:${IMAGE_TAG}"
 
   build-and-push-web:
@@ -165,7 +164,7 @@ jobs:
         run: |
           set -euo pipefail
           docker pull "${DOCKERHUB_REPO_WEB}:${IMAGE_TAG}"
-          docker tag  "${DOCKERHUB_REPO_WEB}:${IMAGE_TAG}" "${NEXUS_REGISTRY_DOMAIN}/devops-web:${IMAGE_TAG}"
+          docker tag "${DOCKERHUB_REPO_WEB}:${IMAGE_TAG}" "${NEXUS_REGISTRY_DOMAIN}/devops-web:${IMAGE_TAG}"
           docker push "${NEXUS_REGISTRY_DOMAIN}/devops-web:${IMAGE_TAG}"
 
   snyk-release:
@@ -295,6 +294,7 @@ jobs:
           source: |
             content/images/**
           target: /srv/supermario
+          strip_components: 1
 
       - name: Deploy on EC2
         uses: appleboy/ssh-action@v1.0.3
