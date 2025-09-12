@@ -15,6 +15,7 @@ permissions:
   packages: write
 
 env:
+  # 'edge' on branch builds; the tag name on tag builds
   IMAGE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || 'edge' }}
 
 jobs:
@@ -113,12 +114,16 @@ jobs:
     needs:
     - build-and-push-app
     - build-and-push-web
+    # Bind repo names to env here, then use env in `with:` to avoid the error
+    env:
+      REPO_APP: ${{ secrets.DOCKERHUB_REPO_APP }}
+      REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}
     uses: tAIness/devops-ci-lib/.github/workflows/snyk-reusable.yml@main
     secrets: inherit
     with:
       images: |
-        ${{ secrets.DOCKERHUB_REPO_APP }}:${{ env.IMAGE_TAG }}
-        ${{ secrets.DOCKERHUB_REPO_WEB }}:${{ env.IMAGE_TAG }}
+        ${{ env.REPO_APP }}:${{ env.IMAGE_TAG }}
+        ${{ env.REPO_WEB }}:${{ env.IMAGE_TAG }}
       ignore_list_path: security/ignores.txt
       severity: high
       upload_artifacts: true
