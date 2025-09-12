@@ -15,6 +15,7 @@ permissions:
   packages: write
 
 env:
+  # tag is 'edge' on branch builds, actual tag name on tag builds
   IMAGE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || 'edge' }}
 
 jobs:
@@ -60,7 +61,7 @@ jobs:
       if: ${{ env.NEXUS_REGISTRY_DOMAIN != '' && env.NEXUS_USERNAME != '' && env.NEXUS_PASSWORD != '' }}
       run: |
         docker pull ${{ env.DOCKERHUB_REPO_APP }}:${{ env.IMAGE_TAG }}
-        docker tag ${{ env.DOCKERHUB_REPO_APP }}:${{ env.IMAGE_TAG }} ${{ env.NEXUS_REGISTRY_DOMAIN }}/devops-app:${{ env.IMAGE_TAG }}
+        docker tag  ${{ env.DOCKERHUB_REPO_APP }}:${{ env.IMAGE_TAG }} ${{ env.NEXUS_REGISTRY_DOMAIN }}/devops-app:${{ env.IMAGE_TAG }}
         docker push ${{ env.NEXUS_REGISTRY_DOMAIN }}/devops-app:${{ env.IMAGE_TAG }}
 
   build-and-push-web:
@@ -105,7 +106,7 @@ jobs:
       if: ${{ env.NEXUS_REGISTRY_DOMAIN != '' && env.NEXUS_USERNAME != '' && env.NEXUS_PASSWORD != '' }}
       run: |
         docker pull ${{ env.DOCKERHUB_REPO_WEB }}:${{ env.IMAGE_TAG }}
-        docker tag ${{ env.DOCKERHUB_REPO_WEB }}:${{ env.IMAGE_TAG }} ${{ env.NEXUS_REGISTRY_DOMAIN }}/devops-web:${{ env.IMAGE_TAG }}
+        docker tag  ${{ env.DOCKERHUB_REPO_WEB }}:${{ env.IMAGE_TAG }} ${{ env.NEXUS_REGISTRY_DOMAIN }}/devops-web:${{ env.IMAGE_TAG }}
         docker push ${{ env.NEXUS_REGISTRY_DOMAIN }}/devops-web:${{ env.IMAGE_TAG }}
 
   snyk-release:
@@ -116,9 +117,9 @@ jobs:
     uses: tAIness/devops-ci-lib/.github/workflows/snyk-reusable.yml@main
     secrets: inherit
     with:
-      repo_app: ${{ env.DOCKERHUB_REPO_APP }}
-      repo_web: ${{ env.DOCKERHUB_REPO_WEB }}
-      image_tag: ${{ github.ref_type == 'tag' && github.ref_name || 'edge' }}
+      images: |
+        ${{ secrets.DOCKERHUB_REPO_APP }}:${{ env.IMAGE_TAG }}
+        ${{ secrets.DOCKERHUB_REPO_WEB }}:${{ env.IMAGE_TAG }}
       ignore_list_path: security/ignores.txt
       severity: high
       upload_artifacts: true

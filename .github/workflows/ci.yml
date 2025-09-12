@@ -14,21 +14,17 @@ jobs:
     timeout-minutes: 10
     steps:
     - uses: actions/checkout@v4
-
     - uses: actions/setup-python@v5
       with:
         python-version: '3.12'
         cache: pip
         cache-dependency-path: app/requirements.txt
-
     - name: Install deps for lint
       run: |
         python -m pip install -U pip
         pip install -r app/requirements.txt pylint
-
     - name: Run pylint (in app/)
       working-directory: app
-      # relax docstring rules for now; remove disables when ready
       run: python -m pylint --disable=C0114,C0116 *.py
 
   unit-tests:
@@ -36,25 +32,21 @@ jobs:
     timeout-minutes: 15
     steps:
     - uses: actions/checkout@v4
-
     - uses: actions/setup-python@v5
       with:
         python-version: '3.12'
         cache: pip
         cache-dependency-path: |
-         app/requirements.txt
-         app/tests/requirements.txt
-
+          app/requirements.txt
+          app/tests/requirements.txt
     - name: Install deps
       run: |
         python -m pip install -U pip
         pip install -r app/requirements.txt
         if [ -f app/tests/requirements.txt ]; then pip install -r app/tests/requirements.txt; fi
-
     - name: Run unit tests
       working-directory: app
       run: python -m pytest -q --junitxml=pytest-results.xml
-
     - name: Upload test report
       if: always()
       uses: actions/upload-artifact@v4
@@ -67,48 +59,7 @@ jobs:
     timeout-minutes: 20
     steps:
     - uses: actions/checkout@v4
-
     - uses: docker/setup-buildx-action@v3
-    - name: Debug Docker Hub creds length
-      run: |
-        echo "Username: $DOCKERHUB_USERNAME"
-        echo "Token length: ${#DOCKERHUB_TOKEN}"
-      env:
-        DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-        DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-
-    - name: Debug Docker creds
-      run: |
-        echo "Username: '${DOCKERHUB_USERNAME}'"
-        echo "Token sha256: $(echo -n "$DOCKERHUB_TOKEN" | sha256sum | cut -c1-12)"
-        echo "Token length: ${#DOCKERHUB_TOKEN}"
-      env:
-        DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-        DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-    - name: Debug secret visibility
-      run: |
-        if [ -z "$DOCKERHUB_TOKEN" ]; then
-          echo "❌ DOCKERHUB_TOKEN is EMPTY (not available here)"
-        else
-          echo "✅ DOCKERHUB_TOKEN is set, length=${#DOCKERHUB_TOKEN}"
-        fi
-      env:
-        DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-
-    - name: Check PAT integrity
-      run: |
-        echo "Byte length: $(echo -n "$DOCKERHUB_TOKEN" | wc -c)"
-        echo "Hex dump:"
-        echo -n "$DOCKERHUB_TOKEN" | hexdump -C
-      env:
-        DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-
-    - name: Manual Docker login
-      run: echo "${DOCKERHUB_TOKEN}" | docker login -u "${DOCKERHUB_USERNAME}" --password-stdin
-      env:
-        DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-        DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-
     - name: Build app image (no push on PR)
       uses: docker/build-push-action@v6
       with:
@@ -116,7 +67,6 @@ jobs:
         file: app/Dockerfile
         push: false
         tags: local/app:pr-check
-
     - name: Build web image (no push on PR)
       uses: docker/build-push-action@v6
       with:
@@ -126,11 +76,13 @@ jobs:
         tags: local/web:pr-check
 
   snyk-pr:
+    # Rebuilds images internally and scans them; does not rely on the build job
     uses: tAIness/devops-ci-lib/.github/workflows/snyk-reusable.yml@main
     secrets: inherit
     with:
       dockerfiles: |
         app/Dockerfile
         web/Dockerfile
+      ignore_list_path: security/ignores.txt
       severity: high
       upload_artifacts: true
