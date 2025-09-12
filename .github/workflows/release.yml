@@ -265,7 +265,19 @@ jobs:
         ls -lah content/images || true
         test -f deploy/compose.yml
 
-      # Upload ONLY the files that exist; keep compose required, images optional
+    - name: Prepare target dir on EC2
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.EC2_HOST }}
+        username: ${{ secrets.EC2_USER }}
+        key: ${{ secrets.EC2_SSH_KEY }}
+        port: ${{ secrets.EC2_PORT }}
+        script: |
+          set -e
+          sudo mkdir -p /srv/supermario
+          # give your SSH user ownership so scp can write there
+          sudo chown -R $USER:$USER /srv/supermario
+
     - name: Upload compose.yml
       uses: appleboy/scp-action@v0.1.7
       with:
@@ -274,11 +286,11 @@ jobs:
         key: ${{ secrets.EC2_SSH_KEY }}
         port: ${{ secrets.EC2_PORT }}
         source: |
-         deploy/compose.yml
+          deploy/compose.yml
         target: /srv/supermario
         strip_components: 1
+        debug: true        # optional: more logs
 
-    # Optional: upload static images dir ONLY if it exists and is non-empty
     - name: Upload static images (optional)
       if: ${{ hashFiles('content/images/**') != '' }}
       uses: appleboy/scp-action@v0.1.7
@@ -290,7 +302,6 @@ jobs:
         source: |
           content/images/**
         target: /srv/supermario
-        strip_components: 0
 
     - name: Deploy on EC2
       uses: appleboy/ssh-action@v1.0.3
