@@ -1,0 +1,35 @@
+# deploy/compose.yml
+services:
+  service:
+    image: ${DOCKER_USER:-itaef}/supermario-service:${TAG:-edge}
+    environment:
+      PORT: "8000"
+      APP_ENV: "production"
+      GUNICORN_WORKERS: "2"
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 10s
+
+  front:
+    image: ${DOCKER_USER:-itaef}/supermario-front:${TAG:-edge}
+    ports:
+      - "8080:80"
+    volumes:
+      # keep this relative to /srv/supermario on the server
+      - ./content/images:/usr/share/nginx/html/images:rw
+    depends_on:
+      service:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost/health >/dev/null"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+      start_period: 5s
