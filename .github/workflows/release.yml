@@ -296,6 +296,13 @@ jobs:
           target: /srv/supermario
           strip_components: 1
 
+      - name: Check required secrets presence
+        run: |
+          echo "Hub username set? $([[ -n '${{ secrets.DOCKERHUB_USERNAME }}' ]] && echo yes || echo NO)"
+          echo "Hub token set?    $([[ -n '${{ secrets.DOCKERHUB_TOKEN }}' ]] && echo yes || echo NO)"
+          echo "Hub repos set?    $([[ -n '${{ secrets.DOCKERHUB_REPO_APP }}' && -n '${{ secrets.DOCKERHUB_REPO_WEB }}' ]] && echo yes || echo NO)"
+          echo "EC2 host/user/key present? $([[ -n '${{ secrets.EC2_HOST }}' && -n '${{ secrets.EC2_USER }}' && -n '${{ secrets.EC2_SSH_KEY }}' ]] && echo yes || echo NO)"
+
       - name: Deploy on EC2
         uses: appleboy/ssh-action@v1.0.3
         env:
