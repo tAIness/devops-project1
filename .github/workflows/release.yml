@@ -15,7 +15,6 @@ permissions:
   packages: write
 
 env:
-  # tag is 'edge' on branch builds, actual tag name on tag builds
   IMAGE_TAG: ${{ github.ref_type == 'tag' && github.ref_name || 'edge' }}
 
 jobs:
