@@ -19,7 +19,7 @@ services:
   front:
     image: ${IMAGE_REPO_WEB}:${TAG}
     ports:
-    - "8080:80"
+    - "80:80"
     volumes:
     - ./content/images:/usr/share/nginx/html/images:rw
     depends_on:
