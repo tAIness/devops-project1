@@ -1,18 +1,19 @@
-# web/Dockerfile
+# web/Dockerfile (Alpine)
 FROM nginx:1.27.5-alpine3.21
 
-# small tools + ensure no optional modules + upgrade zlib to fixed series
+# tools for healthcheck
 RUN set -eux; \
-  apk add --no-cache curl ca-certificates; \
-  # these modules (if present) pull libxml2/xslt; remove them quietly if absent
-  apk del nginx-mod-http-xslt nginx-mod-http-njs 2>/dev/null || true; \
-  # bring zlib to the latest (1.3.x on Alpine 3.21)
-  apk add --no-cache --upgrade zlib
+    apk add --no-cache curl; \
+    # drop optional modules that drag in libxml2/libxslt
+    apk del --no-cache nginx-module-xslt nginx-module-njs || true; \
+    # ensure libxml2 is upgraded to fixed r6 (try strict, fall back to plain upgrade)
+    (apk add --no-cache --upgrade 'libxml2>=2.13.4-r6' || apk upgrade --no-cache libxml2); \
+    rm -rf /var/cache/apk/*
 
-# If you’re serving plain static files from the repo, set where they live:
-#   docker build --build-arg PUBLIC_DIR=dist -t local/web:pr-check web
-ARG PUBLIC_DIR=.
-COPY ${PUBLIC_DIR}/ /usr/share/nginx/html/
+# your nginx.conf if you have one
+# COPY nginx.conf /etc/nginx/nginx.conf
 
-HEALTHCHECK --interval=10s --timeout=3s --retries=5 \
-  CMD curl -fsS http://localhost/ || exit 1
+# if you already have prebuilt assets
+COPY dist/ /usr/share/nginx/html/
+
+HEALTHCHECK --interval=10s --timeout=3s --retries=5 CMD curl -fsS http://localhost/ || exit 1
