@@ -1,30 +1,70 @@
 <!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8" />
-  <title>Super Plumber — Mini Game</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <style>
-    :root { --bg:#eef7ff; --ui:#1e2430; }
-    html,body { height:100%; margin:0; background:var(--bg); color:var(--ui); font-family:system-ui,Roboto,Arial,sans-serif; }
-    .wrap { display:flex; flex-direction:column; align-items:center; gap:12px; padding:16px; }
-    canvas { width:min(92vw,900px); height:min(52vw,520px); border:2px solid #9eb6c9; border-radius:12px; background:#ffffff; }
-    .controls { display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
-    button { background:#2b2f3a; color:#fff; border:none; padding:10px 14px; border-radius:10px; cursor:pointer; font-weight:600; }
-    button:hover { filter:brightness(1.1); }
-  </style>
-  <script src="/game/game.js?v=4" defer></script>
-</head>
-<body>
-  <div class="wrap">
-    <h1>Mini Game</h1>
-    <div class="controls">
-      <button id="startBtn">Start</button>
-      <button id="resetBtn">Reset</button>
-      <span>Jump: Space/↑ • Move: ←/→</span>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>SuperMario Scores</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+      body { font-family: system-ui, Arial, sans-serif; margin: 2rem; }
+      form, .board { max-width: 520px; }
+      input, button { padding: .6rem; font-size: 1rem; }
+      .row { display: flex; gap: .5rem; margin: .5rem 0; }
+      table { border-collapse: collapse; margin-top: 1rem; width: 520px; }
+      th, td { border-bottom: 1px solid #ddd; padding: .5rem; text-align: left; }
+      th { background: #f8f8f8; }
+    </style>
+  </head>
+  <body>
+    <h1>SuperMario – Submit Score</h1>
+    <form id="scoreForm">
+      <div class="row">
+        <input id="name" placeholder="Gamer name" required />
+        <input id="result" type="number" placeholder="Result" required />
+        <button type="submit">Save</button>
+      </div>
+      <div id="msg"></div>
+    </form>
+
+    <div class="board">
+      <h2>Leaderboard (Top 20)</h2>
+      <table id="lb">
+        <thead><tr><th>#</th><th>Gamer</th><th>Best</th></tr></thead>
+        <tbody></tbody>
+      </table>
     </div>
-    <canvas id="game" width="900" height="520" aria-label="Game canvas"></canvas>
-    <a href="/" style="color:#3178c6">← Back</a>
-  </div>
-</body>
+
+    <script>
+      async function loadLeaderboard() {
+        const res = await fetch('/api/leaderboard');
+        const data = await res.json();
+        const tb = document.querySelector('#lb tbody');
+        tb.innerHTML = '';
+        data.forEach((r, i) => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${i+1}</td><td>${r.user_name}</td><td>${r.best}</td>`;
+          tb.appendChild(tr);
+        });
+      }
+      document.getElementById('scoreForm').addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const user_name = document.getElementById('name').value.trim();
+        const result = parseInt(document.getElementById('result').value, 10);
+        const msg = document.getElementById('msg');
+        msg.textContent = 'Saving...';
+        const res = await fetch('/api/score', {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify({ user_name, result })
+        });
+        if (res.ok) {
+          msg.textContent = 'Saved!';
+          await loadLeaderboard();
+        } else {
+          const j = await res.json().catch(() => ({}));
+          msg.textContent = 'Error: ' + (j.error || res.statusText);
+        }
+      });
+      loadLeaderboard();
+    </script>
+  </body>
 </html>

@@ -1,5 +1,5 @@
 # web/Dockerfile
-FROM nginx:alpine
+FROM nginx:1.27-alpine
 
 # add curl for healthcheck
 RUN apk add --no-cache curl
