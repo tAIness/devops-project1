@@ -1,23 +1,16 @@
-FROM python:3.12-slim
+# web/Dockerfile
+FROM nginx:1.27.5-bookworm
 
-ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 TZ=UTC
-WORKDIR /app
+# small utilities for healthcheck/debug
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update && apt-get install -y --no-install-recommends \
-      tini ca-certificates curl \
-    && rm -rf /var/lib/apt/lists/*
+# your nginx config (adjust path if you keep it elsewhere)
+# COPY nginx/default.conf /etc/nginx/conf.d/default.conf
 
-COPY requirements.txt .
-RUN pip install --upgrade --no-cache-dir pip \
- && pip install --no-cache-dir -r requirements.txt
+# static site
+COPY . /usr/share/nginx/html
 
-# create user+group first
-RUN useradd -m -U -u 10001 -s /usr/sbin/nologin appuser
-
-# copy code with correct ownership in one go
-COPY --chown=appuser:appuser . .
-
-USER appuser
-EXPOSE 8000
-ENTRYPOINT ["/usr/bin/tini","--"]
-CMD ["gunicorn","-w","2","-b","0.0.0.0:8000","app:app"]
+EXPOSE 80
+HEALTHCHECK --interval=10s --timeout=3s --retries=5 CMD curl -fsS http://localhost/health || exit 1
