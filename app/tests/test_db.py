@@ -1,20 +1,16 @@
-import os
-import psycopg2
-import pytest
-import time
+import os, time, pytest, psycopg2
 
 def get_conn():
     return psycopg2.connect(
-        dbname=os.getenv("DB_NAME"),
-        user=os.getenv("DB_USER"),
-        password=os.getenv("DB_PASSWORD"),
-        host=os.getenv("DB_HOST", "localhost"),
+        dbname=os.getenv("DB_NAME", "supermario"),
+        user=os.getenv("DB_USER", "mario"),
+        password=os.getenv("DB_PASSWORD", "secret"),
+        host=os.getenv("DB_HOST", "postgres"),  # default matches service name
         port=os.getenv("DB_PORT", "5432"),
     )
 
 @pytest.fixture(scope="session", autouse=True)
 def init_db():
-    # retry loop
     for i in range(10):
         try:
             conn = get_conn()
