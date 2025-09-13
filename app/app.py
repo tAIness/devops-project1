@@ -1,61 +1,57 @@
-import flask
-import requests
-import jsonify
-import db
-import psycopg2
-import json
+import os  # stdlib
 
-app = flask(__name__)
+from flask import Flask, request, jsonify  # third-party
+import psycopg2  # third-party (only for the exception type)
 
-with app.app_context():
-  try:
-    db.init_db()
-  except psycopg2.Error as exc:
-    app.logger.warning("DB init skipped: %s", exc)
+# first-party
+from db import init_db, insert_score, get_scores
 
-@app.get("/health")
-def health() -> tuple[str, int]:
-    return "ok", 200
+app = Flask(__name__)
 
-@app.post("/score")
-def score():
-    payload = requests.get_json(silent=True) or {}
-    user = (
-        payload.get("user")
-        or requests.form.get("user")
-        or requests.args.get("user")
-        or ""
-    ).strip()
 
-    result_raw = (
-        payload.get("result")
-        or requests.form.get("result")
-        or requests.args.get("result")
-    )
+@app.route("/health", methods=["GET"])
+def health():
+    return jsonify({"status": "ok"}), 200
 
-    if not user:
-        return jsonify({"error": "user is required"}), 400
+
+@app.route("/score", methods=["POST"])
+def save_score():
+    """
+    Accepts JSON like: {"user_name": "mario", "result": 123}
+    """
+    data = request.get_json(silent=True) or {}
+    user_name = data.get("user_name")
+    result = data.get("result")
+
+    if not user_name or not isinstance(result, int):
+        return jsonify({"error": "Provide user_name (str) and result (int)"}), 400
+
     try:
-        result = int(result_raw)
-    except (TypeError, ValueError):
-        return jsonify({"error": "result must be integer"}), 400
+        insert_score(user_name=user_name, result=result)
+        return jsonify({"message": "saved"}), 201
+    except psycopg2.Error as exc:  # narrower than bare Exception
+        return jsonify({"error": "db_error", "detail": str(exc)}), 500
 
-    # FIX: pass both user and result
-    db.insert_score(user, result)
-    return jsonify({"status": "saved"}), 201
 
-@app.get("/scores")
-def scores():
-    limit = requests.args.get("limit", default="50")
+@app.route("/scores", methods=["GET"])
+def list_scores():
+    """
+    Optional query param: ?limit=10
+    """
     try:
-        limit_i = max(1, min(500, int(limit)))
+        limit = int(request.args.get("limit", "10"))
     except ValueError:
-        limit_i = 50
-    return jsonify(db.list_scores(limit=limit_i))
+        limit = 10
 
-# Ensure table exists on startup
-with app.app_context():
     try:
-        db.init_db()
-    except Exception as exc:  # pragma: no cover
-        app.logger.warning("DB init skipped: %s", exc)
+        rows = get_scores(limit=limit)
+        # rows expected as list[dict] from db.get_scores()
+        return jsonify(rows), 200
+    except psycopg2.Error as exc:
+        return jsonify({"error": "db_error", "detail": str(exc)}), 500
+
+
+if __name__ == "__main__":
+    # Initialize table if needed (safe to call more than once)
+    init_db()
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "8000")))

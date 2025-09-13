@@ -1,66 +1,89 @@
+# app/db.py
+from __future__ import annotations
+
 import os
-from functools import lru_cache
 from contextlib import contextmanager
+from typing import Iterator, List, Dict
+
+import psycopg2
 from psycopg2.pool import SimpleConnectionPool
+from psycopg2.extras import RealDictCursor
 
-def _env(name: str, default: str) -> str:
-    return os.getenv(name, default)
+# ---- connection settings from env (compose/EC2 pass these) ----
+DB_NAME = os.getenv("DB_NAME", "supermario")
+DB_USER = os.getenv("DB_USER", "mario")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "secret")
+DB_HOST = os.getenv("DB_HOST", "localhost")
+DB_PORT = int(os.getenv("DB_PORT", "5432"))
 
-@lru_cache(maxsize=1)
-def get_pool() -> SimpleConnectionPool:
-    """
-    Lazily create one connection pool and reuse it (no globals).
-    Defaults match docker-compose; override via env in CI/Prod.
-    """
-    return SimpleConnectionPool(
-        minconn=1,
-        maxconn=int(_env("DB_MAXCONN", "5")),
-        dbname=_env("DB_NAME", "supermario"),
-        user=_env("DB_USER", "mario"),
-        password=_env("DB_PASSWORD", "secret"),
-        host=_env("DB_HOST", "db"),   # CI uses 'postgres'; compose uses 'db'
-        port=int(_env("DB_PORT", "5432")),
-    )
+
+# ---- lightweight singleton holder (no module-level 'global') ----
+class _PoolHolder:
+    pool: SimpleConnectionPool | None = None
+
+
+def _get_pool() -> SimpleConnectionPool:
+    if _PoolHolder.pool is None:
+        _PoolHolder.pool = SimpleConnectionPool(
+            minconn=1,
+            maxconn=5,
+            dbname=DB_NAME,
+            user=DB_USER,
+            password=DB_PASSWORD,
+            host=DB_HOST,
+            port=DB_PORT,
+        )
+    return _PoolHolder.pool
+
 
 @contextmanager
-def conn():
-    pool = get_pool()
-    c = pool.getconn()
+def get_conn() -> Iterator[psycopg2.extensions.connection]:
+    pool = _get_pool()
+    conn = pool.getconn()
     try:
-        yield c
+        yield conn
     finally:
-        pool.putconn(c)
+        pool.putconn(conn)
 
+
+# ---- schema + queries ----
 def init_db() -> None:
-    """Create table if it doesn't exist."""
-    with conn() as c, c.cursor() as cur:
+    """Create the scores table if it doesn't exist."""
+    with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            "CREATE TABLE IF NOT EXISTS scores ("
-            "id SERIAL PRIMARY KEY, "
-            "user_name TEXT NOT NULL, "
-            "result INT NOT NULL, "
-            "created_at TIMESTAMP DEFAULT NOW()"
-            ")"
+            """
+            CREATE TABLE IF NOT EXISTS scores (
+              id SERIAL PRIMARY KEY,
+              user_name TEXT NOT NULL,
+              result INTEGER NOT NULL,
+              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
+            """
         )
-        c.commit()
+        conn.commit()
+
 
 def insert_score(user_name: str, result: int) -> None:
-    with conn() as c, c.cursor() as cur:
+    """Insert one score row."""
+    with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
-            "INSERT INTO scores (user_name, result) VALUES (%s, %s)",
-            (user_name, int(result)),
+            "INSERT INTO scores (user_name, result) VALUES (%s, %s);",
+            (user_name, result),
         )
-        c.commit()
+        conn.commit()
 
-def list_scores(limit: int = 50):
-    with conn() as c, c.cursor() as cur:
+
+def get_scores(limit: int = 10) -> list[dict]:
+    """Return latest scores as a list of dicts."""
+    with get_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
         cur.execute(
-            "SELECT user_name, result, created_at "
-            "FROM scores ORDER BY id DESC LIMIT %s",
+            """
+            SELECT id, user_name, result, created_at
+            FROM scores
+            ORDER BY id DESC
+            LIMIT %s;
+            """,
             (limit,),
         )
         rows = cur.fetchall()
-        return [
-            {"user": u, "result": r, "created_at": str(ts)}
-            for (u, r, ts) in rows
-        ]
+        return [dict(r) for r in rows]
