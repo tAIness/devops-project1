@@ -3,13 +3,13 @@ from __future__ import annotations
 
 import os
 from contextlib import contextmanager
-from typing import Iterator, List, Dict
+from typing import Iterator
 
 import psycopg2
 from psycopg2.pool import SimpleConnectionPool
 from psycopg2.extras import RealDictCursor
 
-# ---- connection settings from env (compose/EC2 pass these) ----
+# ---- connection settings from env ----
 DB_NAME = os.getenv("DB_NAME", "supermario")
 DB_USER = os.getenv("DB_USER", "mario")
 DB_PASSWORD = os.getenv("DB_PASSWORD", "secret")
@@ -17,14 +17,11 @@ DB_HOST = os.getenv("DB_HOST", "localhost")
 DB_PORT = int(os.getenv("DB_PORT", "5432"))
 
 
-# ---- lightweight singleton holder (no module-level 'global') ----
-class _PoolHolder:
-    pool: SimpleConnectionPool | None = None
-
-
 def _get_pool() -> SimpleConnectionPool:
-    if _PoolHolder.pool is None:
-        _PoolHolder.pool = SimpleConnectionPool(
+    """Lazy-create and reuse a single connection pool (no globals/classes)."""
+    pool = getattr(_get_pool, "pool", None)
+    if pool is None:
+        _get_pool.pool = SimpleConnectionPool(
             minconn=1,
             maxconn=5,
             dbname=DB_NAME,
@@ -33,7 +30,8 @@ def _get_pool() -> SimpleConnectionPool:
             host=DB_HOST,
             port=DB_PORT,
         )
-    return _PoolHolder.pool
+        pool = _get_pool.pool
+    return pool
 
 
 @contextmanager
@@ -46,7 +44,6 @@ def get_conn() -> Iterator[psycopg2.extensions.connection]:
         pool.putconn(conn)
 
 
-# ---- schema + queries ----
 def init_db() -> None:
     """Create the scores table if it doesn't exist."""
     with get_conn() as conn, conn.cursor() as cur:
