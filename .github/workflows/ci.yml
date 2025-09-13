@@ -66,19 +66,18 @@ jobs:
           POSTGRES_DB: supermario
           POSTGRES_USER: mario
           POSTGRES_PASSWORD: secret
-        ports:
-          - 5432:5432
+        # no need to publish ports, the job can talk via service name
         options: >-
           --health-cmd="pg_isready -U mario -d supermario"
           --health-interval=10s
           --health-timeout=5s
-          --health-retries=5
+          --health-retries=10
 
     env:
       DB_NAME: supermario
       DB_USER: mario
       DB_PASSWORD: secret
-      DB_HOST: postgres
+      DB_HOST: postgres   # 👈 service name is the hostname
       DB_PORT: 5432
 
     steps:
@@ -89,11 +88,13 @@ jobs:
 
       - name: Install dependencies
         run: |
+          sudo apt-get update
+          sudo apt-get install -y postgresql-client
           pip install -r app/requirements.txt pytest psycopg2-binary
 
       - name: Wait for Postgres
         run: |
-          for i in {1..12}; do
+          for i in {1..20}; do
             pg_isready -h postgres -p 5432 -U mario -d supermario && break
             echo "Waiting for postgres..."
             sleep 5
