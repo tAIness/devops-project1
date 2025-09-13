@@ -1,6 +1,13 @@
 # web/Dockerfile
 FROM nginx:1.27.5-bookworm
 
+RUN set -eux; \
+  apt-get update; \
+  apt-get -y --no-install-recommends purge nginx-module-xslt nginx-module-njs || true; \
+  apt-get -y --no-install-recommends autoremove; \
+  apt-get -y --no-install-recommends install ca-certificates curl; \
+  apt-get -y --no-install-recommends install --only-upgrade zlib1g nginx; \
+  rm -rf /var/lib/apt/lists/*
 # If you only serve static files, you don't need xslt or njs.
 # Removing them also drops the libxml2 path entirely.
 RUN apt-get update \
