@@ -54,7 +54,7 @@ jobs:
   db-tests:
     runs-on: ubuntu-latest
     services:
-      postgres: # 👈 service key name, becomes hostname
+      postgres:
         image: postgres:17.5
         env:
           POSTGRES_DB: supermario
@@ -67,24 +67,20 @@ jobs:
           --health-retries=5
         ports:
           - 5432:5432
-
     env:
       DB_NAME: supermario
       DB_USER: mario
       DB_PASSWORD: secret
-      DB_HOST: postgres   # 👈 must exactly match the service key
+      DB_HOST: postgres
       DB_PORT: 5432
-
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - name: Install dependencies
         run: |
           pip install -r app/requirements.txt pytest psycopg2-binary
-
       - name: Wait for Postgres
         run: |
           for i in {1..12}; do
@@ -92,10 +88,14 @@ jobs:
             echo "Waiting for postgres..."
             sleep 5
           done
-
-      - name: Run DB tests
+      - name: Run DB tests only
         working-directory: app
-        run: pytest -v tests/test_db.py --junitxml=pytest-results.xml
+        run: python -m pytest -v -m db tests/test_db.py --junitxml=pytest-results.xml
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: db-test-results
+          path: app/pytest-results.xml
 
       - uses: actions/upload-artifact@v4
         if: always()
