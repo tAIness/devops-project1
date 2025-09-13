@@ -1,4 +1,8 @@
-import os, time, pytest, psycopg2
+import os
+import time
+import psycopg2
+import pytest
+pytestmark = pytest.mark.db
 
 
 def get_conn():
