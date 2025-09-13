@@ -61,7 +61,7 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:16
+        image: postgres:17.5
         env:
           DB_NAME: supermario
           DB_USER: supermario
