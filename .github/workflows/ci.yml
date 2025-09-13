@@ -64,20 +64,20 @@ jobs:
         image: postgres:17.5
         env:
           POSTGRES_DB: supermario
-          POSTGRES_USER: supermario
-          POSTGRES_PASSWORD: supermario
+          POSTGRES_USER: mario
+          POSTGRES_PASSWORD: secret
         ports:
           - 5432:5432
         options: >-
-          --health-cmd="pg_isready -U supermario -d supermario"
+          --health-cmd="pg_isready -U mario -d secret"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
 
     env:
       DB_NAME: supermario
-      DB_USER: supermario
-      DB_PASSWORD: supermario
+      DB_USER: mario
+      DB_PASSWORD: secret
       DB_HOST: localhost
       DB_PORT: 5432
 
