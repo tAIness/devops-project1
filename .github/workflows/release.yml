@@ -142,6 +142,13 @@ jobs:
           tags: |
             ${{ env.DOCKERHUB_REPO_WEB }}:${{ env.IMAGE_TAG }}
 
+      - name: Test DB container locally
+        run: |
+          docker run --rm --network host \
+          -e PGPASSWORD="${DB_PASSWORD}" \
+           postgres:15 \
+           psql -h localhost -U "${DB_USER}" -d "${DB_NAME}" -c "SELECT 1;"
+
       - name: Mirror web to Nexus
         if: ${{ env.REGISTRY_URL != '' && env.REGISTRY_USERNAME != '' && env.REGISTRY_PASSWORD != '' }}
         shell: bash
@@ -260,7 +267,7 @@ jobs:
           target: /srv/supermario
           strip_components: 1
 
-      - name: Upload static images (optional)
+      - name: Upload static images
         if: ${{ hashFiles('content/images/**') != '' }}
         uses: appleboy/scp-action@v0.1.7
         with:
@@ -275,46 +282,65 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         env:
           TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
+          # Hub creds and repos
           DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
           DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           DH_REPO_APP: ${{ secrets.DOCKERHUB_REPO_APP }}
           DH_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}
-          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
-          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
-          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+          # Nexus (if you ever switch DEPLOY_REGISTRY to 'nexus')
+          NEXUS_DOMAIN: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}
+          NEXUS_USER: ${{ secrets.NEXUS_USERNAME }}
+          NEXUS_PASS: ${{ secrets.NEXUS_PASSWORD }}
           NEXUS_REPO_APP: ${{ secrets.NEXUS_REPO_APP }}
           NEXUS_REPO_WEB: ${{ secrets.NEXUS_REPO_WEB }}
           DEPLOY_REGISTRY: ${{ secrets.DEPLOY_REGISTRY }}
+          DB_NAME: ${{ secrets.DB_NAME }}
+          DB_USER: ${{ secrets.DB_USER }}
+          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_PORT: ${{ secrets.DB_PORT }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          port: ${{ secrets.EC2_SSH_PORT || '22' }}
-          envs: TAG,DH_USER,DH_TOKEN,DH_REPO_APP,DH_REPO_WEB,REGISTRY_URL,REGISTRY_USERNAME,REGISTRY_PASSWORD,NEXUS_REPO_APP,NEXUS_REPO_WEB,DEPLOY_REGISTRY
+          envs: TAG,DH_USER,DH_TOKEN,DH_REPO_APP,DH_REPO_WEB,NEXUS_DOMAIN,NEXUS_USER,NEXUS_PASS,NEXUS_REPO_APP,NEXUS_REPO_WEB,DEPLOY_REGISTRY,DB_NAME,DB_USER,DB_PASSWORD,DB_PORT
           script: |
             set -eo pipefail
             sudo mkdir -p /srv/supermario/content/images
             cd /srv/supermario
-            if [ -z "${TAG:-}" ]; then echo "TAG empty"; exit 1; fi
+
+            # Guard against empty tag
+            if [ -z "${TAG:-}" ]; then
+              echo "ERROR: TAG is empty. Refuse to deploy." >&2
+              exit 1
+            fi
 
             REG="${DEPLOY_REGISTRY:-hub}"
             if [ "$REG" = "nexus" ]; then
-              echo "${REGISTRY_PASSWORD}" | sudo docker login "${REGISTRY_URL}" -u "${REGISTRY_USERNAME}" --password-stdin
-              NAME_APP="${DH_REPO_APP##*/}"
-              NAME_WEB="${DH_REPO_WEB##*/}"
-              IMAGE_REPO_APP="${NEXUS_REPO_APP:-${REGISTRY_URL}/${NAME_APP}}"
-              IMAGE_REPO_WEB="${NEXUS_REPO_WEB:-${REGISTRY_URL}/${NAME_WEB}}"
+              echo "${NEXUS_PASS}" | sudo docker login "${NEXUS_DOMAIN}" -u "${NEXUS_USER}" --password-stdin
+              IMAGE_REPO_APP="${NEXUS_REPO_APP}"
+              IMAGE_REPO_WEB="${NEXUS_REPO_WEB}"
             else
               echo "${DH_TOKEN}" | sudo docker login -u "${DH_USER}" --password-stdin
               IMAGE_REPO_APP="${DH_REPO_APP}"
               IMAGE_REPO_WEB="${DH_REPO_WEB}"
             fi
 
-            printf "IMAGE_REPO_APP=%s\nIMAGE_REPO_WEB=%s\nTAG=%s\n" \
-              "${IMAGE_REPO_APP}" "${IMAGE_REPO_WEB}" "${TAG}" | sudo tee .env >/dev/null
+            # Write or update .env for compose (app, web, db)
+            {
+              echo "IMAGE_REPO_APP=${IMAGE_REPO_APP}"
+              echo "IMAGE_REPO_WEB=${IMAGE_REPO_WEB}"
+              echo "TAG=${TAG}"
+              echo "DB_NAME=${DB_NAME}"
+              echo "DB_USER=${DB_USER}"
+              echo "DB_PASSWORD=${DB_PASSWORD}"
+              echo "DB_PORT=${DB_PORT:-5432}"
+            } | sudo tee .env >/dev/null
 
+            echo "Pulling ${IMAGE_REPO_APP}:${TAG} and ${IMAGE_REPO_WEB}:${TAG}…"
             sudo docker pull "${IMAGE_REPO_APP}:${TAG}"
             sudo docker pull "${IMAGE_REPO_WEB}:${TAG}"
+
+            # Deploy (now also brings up Postgres)
             sudo docker compose -f compose.yml pull
             sudo docker compose -f compose.yml up -d --no-build
             sudo docker image prune -f

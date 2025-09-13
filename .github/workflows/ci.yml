@@ -54,6 +54,48 @@ jobs:
         name: unit-test-results
         path: app/pytest-results.xml
 
+  db-tests:
+    name: Run DB integration tests
+    runs-on: ubuntu-latest
+    needs: [deploy-ec2]   # wait until deployment done
+    env:
+      DB_NAME: ${{ secrets.DB_NAME }}
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_HOST: ${{ secrets.DB_HOST }}
+      DB_PORT: ${{ secrets.DB_PORT }}
+    steps:
+
+    - uses: actions/checkout@v4
+
+    - name: Setup Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install dependencies
+      run: |
+         pip install -r app/requirements.txt pytest psycopg2-binary
+
+    - name: Run DB tests
+      run: |
+          pytest tests/test_db.py -v --junitxml=pytest-results.xml
+
+    - name: Upload test results
+      if: always()  # upload even if tests fail
+      uses: actions/upload-artifact@v4
+      with:
+        name: db-test-results
+        path: pytest-results.xml
+
+    - name: Run DB integration tests
+      run: |
+         pip install pytest psycopg2-binary
+         pytest -v tests/test_db.py
+
+    - name: Check migrations
+      run: alembic upgrade head
+
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
