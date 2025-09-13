@@ -142,5 +142,5 @@ jobs:
         app/Dockerfile
         web/Dockerfile
       ignore_list_path: security/ignores.txt
-      severity: high
+      severity: critical
       upload_artifacts: true

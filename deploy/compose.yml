@@ -1,18 +1,16 @@
+# deploy/compose.yml
 services:
   db:
-    image: postgres:15
-    container_name: supermario-db
+    image: postgres:17.5
     environment:
-      POSTGRES_DB: ${DB_NAME}
-      POSTGRES_USER: ${DB_USER}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
-    ports:
-    - "${DB_PORT:-5432}:5432"
+      POSTGRES_DB: ${DB_NAME:-supermario}
+      POSTGRES_USER: ${DB_USER:-mario}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
     volumes:
-    - db_data:/var/lib/postgresql/data
+    - dbdata:/var/lib/postgresql/data
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER} -d ${DB_NAME}"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-mario} -d ${DB_NAME:-supermario}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -23,12 +21,16 @@ services:
       PORT: "8000"
       APP_ENV: "production"
       GUNICORN_WORKERS: "2"
-      DATABASE_URL: postgres://${DB_USER}:${DB_PASSWORD}@db:${DB_PORT}/${DB_NAME}
-    ports:
-    - "8000:8000"
+      DB_NAME: ${DB_NAME}
+      DB_USER: ${DB_USER}
+      DB_PASSWORD: ${DB_PASSWORD}
+      DB_HOST: db
+      DB_PORT: ${DB_PORT:-5432}
     depends_on:
       db:
         condition: service_healthy
+    ports:
+    - "8000:8000"
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
@@ -55,4 +57,4 @@ services:
       start_period: 5s
 
 volumes:
-  db_data:
+  dbdata:

@@ -1,26 +1,18 @@
 # web/Dockerfile
-FROM nginx:alpine
+FROM nginx:1.27.5-alpine3.21
 
-# add curl for healthcheck
-RUN apk add --no-cache curl
+# small tools + ensure no optional modules + upgrade zlib to fixed series
+RUN set -eux; \
+  apk add --no-cache curl ca-certificates; \
+  # these modules (if present) pull libxml2/xslt; remove them quietly if absent
+  apk del nginx-mod-http-xslt nginx-mod-http-njs 2>/dev/null || true; \
+  # bring zlib to the latest (1.3.x on Alpine 3.21)
+  apk add --no-cache --upgrade zlib
 
-# Set web root and config locations
-ENV WEB_ROOT=/usr/share/nginx/html
+# If you’re serving plain static files from the repo, set where they live:
+#   docker build --build-arg PUBLIC_DIR=dist -t local/web:pr-check web
+ARG PUBLIC_DIR=.
+COPY ${PUBLIC_DIR}/ /usr/share/nginx/html/
 
-# Copy your Nginx config (assumes it's a full server block)
-# If your file is already a valid default server config, this is fine.
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-
-# Copy static site (CSS + index.html)
-COPY static/ ${WEB_ROOT}/
-
-# Copy game (served under /game/)
-COPY game/ ${WEB_ROOT}/game/
-
-# Copy homepage "hero" images (baked in, not overridden by the volume)
-# Move your three images to web/assets/hero/ before building
-COPY assets/hero/ ${WEB_ROOT}/assets/hero/
-
-EXPOSE 80
-
-CMD ["nginx","-g","daemon off;"]
+HEALTHCHECK --interval=10s --timeout=3s --retries=5 \
+  CMD curl -fsS http://localhost/ || exit 1
