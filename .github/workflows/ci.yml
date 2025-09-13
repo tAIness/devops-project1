@@ -6,7 +6,7 @@ name: CI (PR checks)
 on:
   pull_request:
     branches:
-    - main
+      - main
 
 permissions:
   contents: read
@@ -16,46 +16,46 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
-        cache: pip
-        cache-dependency-path: app/requirements.txt
-    - name: Install deps for lint
-      run: |
-        python -m pip install -U pip
-        pip install -r app/requirements.txt pylint
-    - name: Run pylint (in app/)
-      working-directory: app
-      run: python -m pylint --disable=C0114,C0116 *.py
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: app/requirements.txt
+      - name: Install deps for lint
+        run: |
+          python -m pip install -U pip
+          pip install -r app/requirements.txt pylint
+      - name: Run pylint (in app/)
+        working-directory: app
+        run: python -m pylint --disable=C0114,C0116 *.py
 
   unit-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-    - uses: actions/checkout@v4
-    - uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
-        cache: pip
-        cache-dependency-path: |
-          app/requirements.txt
-          app/tests/requirements.txt
-    - name: Install deps
-      run: |
-        python -m pip install -U pip
-        pip install -r app/requirements.txt
-        if [ -f app/tests/requirements.txt ]; then pip install -r app/tests/requirements.txt; fi
-    - name: Run unit tests
-      working-directory: app
-      run: python -m pytest -q --junitxml=pytest-results.xml
-    - name: Upload test report
-      if: always()
-      uses: actions/upload-artifact@v4
-      with:
-        name: unit-test-results
-        path: app/pytest-results.xml
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            app/requirements.txt
+            app/tests/requirements.txt
+      - name: Install deps
+        run: |
+          python -m pip install -U pip
+          pip install -r app/requirements.txt
+          if [ -f app/tests/requirements.txt ]; then pip install -r app/tests/requirements.txt; fi
+      - name: Run unit tests
+        working-directory: app
+        run: python -m pytest -q --junitxml=pytest-results.xml
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: unit-test-results
+          path: app/pytest-results.xml
 
   db-tests:
     runs-on: ubuntu-latest
@@ -63,63 +63,79 @@ jobs:
       postgres:
         image: postgres:17.5
         env:
-          DB_NAME: supermario
-          DB_USER: supermario
-          DB_PASSWORD: supermario
-        ports: ["5432:5432"]
+          POSTGRES_DB: supermario
+          POSTGRES_USER: supermario
+          POSTGRES_PASSWORD: supermario
+        ports:
+          - 5432:5432
         options: >-
           --health-cmd="pg_isready -U supermario -d supermario"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
+
     env:
+      DB_NAME: supermario
+      DB_USER: supermario
+      DB_PASSWORD: supermario
       DB_HOST: localhost
       DB_PORT: 5432
 
     steps:
-        - uses: actions/checkout@v4
-        - uses: actions/setup-python@v5
-          with:
-            python-version: "3.12"
-        - run: pip install -r app/requirements.txt pytest psycopg2-binary
-        - run: pytest -v tests/test_db.py --junitxml=pytest-results.xml
-        - uses: actions/upload-artifact@v4
-          if: always()
-          with:
-            name: db-test-results
-            path: pytest-results.xml
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
 
-        - name: Run DB integration tests
-          run: |
-            pip install pytest psycopg2-binary
-            pytest -v tests/test_db.py
+      - name: Install dependencies
+        run: |
+          pip install -r app/requirements.txt pytest psycopg2-binary
 
-        - name: Check migrations
-          run: alembic upgrade head
+      - name: Wait for Postgres
+        run: |
+          for i in {1..10}; do
+            pg_isready -h localhost -p 5432 -U mario && break
+            echo "Waiting for postgres..."
+            sleep 5
+          done
+
+      - name: Run DB tests
+        run: pytest -v tests/test_db.py --junitxml=pytest-results.xml
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: db-test-results
+          path: pytest-results.xml
+
+      # Uncomment when Alembic is ready
+      # - name: Check migrations
+      #   run: |
+      #     pip install alembic
+      #     alembic upgrade head
 
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-    - uses: actions/checkout@v4
-    - uses: docker/setup-buildx-action@v3
-    - name: Build app image (no push on PR)
-      uses: docker/build-push-action@v6
-      with:
-        context: app
-        file: app/Dockerfile
-        push: false
-        tags: local/app:pr-check
-    - name: Build web image (no push on PR)
-      uses: docker/build-push-action@v6
-      with:
-        context: web
-        file: web/Dockerfile
-        push: false
-        tags: local/web:pr-check
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build app image (no push on PR)
+        uses: docker/build-push-action@v6
+        with:
+          context: app
+          file: app/Dockerfile
+          push: false
+          tags: local/app:pr-check
+      - name: Build web image (no push on PR)
+        uses: docker/build-push-action@v6
+        with:
+          context: web
+          file: web/Dockerfile
+          push: false
+          tags: local/web:pr-check
 
   snyk-pr:
-    # Rebuilds images internally and scans them; does not rely on the build job
     uses: tAIness/devops-ci-lib/.github/workflows/snyk-reusable.yml@main
     secrets: inherit
     with:
