@@ -22,9 +22,9 @@ RUN apt-get update \
       nginx \
  && rm -rf /var/lib/apt/lists/*
 
-# Copy your site content and nginx.conf as before
-# COPY nginx.conf /etc/nginx/nginx.conf
-# COPY dist/ /usr/share/nginx/html/
+
+COPY nginx.conf /etc/nginx/nginx.conf
+COPY dist/ /usr/share/nginx/html/
 
 HEALTHCHECK --interval=10s --timeout=3s --retries=5 \
   CMD curl -fsS http://localhost/ || exit 1
