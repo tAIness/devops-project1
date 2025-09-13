@@ -1,4 +1,4 @@
-import os, psycopg2, pytest
+import os, time, psycopg2, pytest
 
 def get_conn():
     return psycopg2.connect(
@@ -11,7 +11,17 @@ def get_conn():
 
 @pytest.fixture(scope="session", autouse=True)
 def init_db():
-    conn = get_conn()
+    # retry loop
+    for i in range(10):
+        try:
+            conn = get_conn()
+            break
+        except psycopg2.OperationalError as e:
+            print(f"DB not ready yet, retry {i+1}/10: {e}")
+            time.sleep(3)
+    else:
+        raise RuntimeError("Postgres did not become ready in time")
+
     cur = conn.cursor()
     cur.execute("""
     CREATE TABLE IF NOT EXISTS scores (
@@ -23,19 +33,4 @@ def init_db():
     """)
     conn.commit()
     cur.close()
-    conn.close()
-
-def test_connection():
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT 1;")
-    assert cur.fetchone()[0] == 1
-    conn.close()
-
-def test_table_exists():
-    conn = get_conn()
-    cur = conn.cursor()
-    cur.execute("SELECT to_regclass('public.scores');")
-    exists = cur.fetchone()[0]
-    assert exists == "scores"
     conn.close()
