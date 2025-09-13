@@ -1,16 +1,23 @@
 # web/Dockerfile
 FROM nginx:1.27.5-bookworm
 
-# small utilities for healthcheck/debug
+# If you only serve static files, you don't need xslt or njs.
+# Removing them also drops the libxml2 path entirely.
 RUN apt-get update \
- && apt-get install -y --no-install-recommends curl ca-certificates \
+ && apt-get -y --no-install-recommends purge nginx-module-xslt nginx-module-njs || true \
+ && apt-get -y --no-install-recommends autoremove \
+ && apt-get -y --no-install-recommends install ca-certificates curl \
+ # Upgrade vulnerable libs to patched Debian bookworm versions
+ && apt-get -y --no-install-recommends --only-upgrade \
+      libxml2 \
+      libxslt1.1 \
+      zlib1g \
+      nginx \
  && rm -rf /var/lib/apt/lists/*
 
-# your nginx config (adjust path if you keep it elsewhere)
-# COPY nginx/default.conf /etc/nginx/conf.d/default.conf
+# Copy your site content and nginx.conf as before
+# COPY nginx.conf /etc/nginx/nginx.conf
+# COPY dist/ /usr/share/nginx/html/
 
-# static site
-COPY . /usr/share/nginx/html
-
-EXPOSE 80
-HEALTHCHECK --interval=10s --timeout=3s --retries=5 CMD curl -fsS http://localhost/health || exit 1
+HEALTHCHECK --interval=10s --timeout=3s --retries=5 \
+  CMD curl -fsS http://localhost/ || exit 1
