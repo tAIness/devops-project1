@@ -60,13 +60,12 @@ jobs:
   db-tests:
     runs-on: ubuntu-latest
     services:
-      postgres:
+      db:
         image: postgres:17.5
         env:
           POSTGRES_DB: supermario
           POSTGRES_USER: mario
           POSTGRES_PASSWORD: secret
-        # no need to publish ports, the job can talk via service name
         options: >-
           --health-cmd="pg_isready -U mario -d supermario"
           --health-interval=10s
@@ -77,7 +76,7 @@ jobs:
       DB_NAME: supermario
       DB_USER: mario
       DB_PASSWORD: secret
-      DB_HOST: postgres   # 👈 service name is the hostname
+      DB_HOST: db
       DB_PORT: 5432
 
     steps:
