@@ -1,15 +1,13 @@
 # web/Dockerfile
-FROM nginx:1.27.5-bookworm
+FROM nginx:1.27.5-alpine3.21
 
-# small utilities for healthcheck/debug
-RUN apt-get update \
- && apt-get install -y --no-install-recommends curl ca-certificates \
- && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache curl \
+ && echo "https://dl-cdn.alpinelinux.org/alpine/edge/main" >> /etc/apk/repositories \
+ && apk update \
+ && apk --no-cache upgrade libxml2 libxslt \
+ && sed -i '$d' /etc/apk/repositories
 
-# your nginx config (adjust path if you keep it elsewhere)
 # COPY nginx/default.conf /etc/nginx/conf.d/default.conf
-
-# static site
 COPY . /usr/share/nginx/html
 
 EXPOSE 80
