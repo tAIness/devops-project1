@@ -1,49 +1,66 @@
-# app/db.py
 import os
+from functools import lru_cache
+from contextlib import contextmanager
 from psycopg2.pool import SimpleConnectionPool
-import psycopg2
 
-DB_NAME = os.getenv("DB_NAME", "supermario")
-DB_USER = os.getenv("DB_USER", "mario")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "secret")
-DB_HOST = os.getenv("DB_HOST", "db")      # 'db' if using docker-compose service, or set to your host
-DB_PORT = int(os.getenv("DB_PORT", "5432"))
+def _env(name: str, default: str) -> str:
+    return os.getenv(name, default)
 
-_pool = None
+@lru_cache(maxsize=1)
+def get_pool() -> SimpleConnectionPool:
+    """
+    Lazily create one connection pool and reuse it (no globals).
+    Defaults match docker-compose; override via env in CI/Prod.
+    """
+    return SimpleConnectionPool(
+        minconn=1,
+        maxconn=int(_env("DB_MAXCONN", "5")),
+        dbname=_env("DB_NAME", "supermario"),
+        user=_env("DB_USER", "mario"),
+        password=_env("DB_PASSWORD", "secret"),
+        host=_env("DB_HOST", "db"),   # CI uses 'postgres'; compose uses 'db'
+        port=int(_env("DB_PORT", "5432")),
+    )
 
-def get_pool():
-    global _pool
-    if _pool is None:
-        _pool = SimpleConnectionPool(
-            minconn=1, maxconn=5,
-            dbname=DB_NAME, user=DB_USER, password=DB_PASSWORD,
-            host=DB_HOST, port=DB_PORT
-        )
-    return _pool
-
-def with_conn(fn):
-    def _wrap(*args, **kwargs):
-        pool = get_pool()
-        conn = pool.getconn()
-        try:
-            return fn(conn, *args, **kwargs)
-        finally:
-            pool.putconn(conn)
-    return _wrap
-
-def init_schema():
+@contextmanager
+def conn():
     pool = get_pool()
-    conn = pool.getconn()
+    c = pool.getconn()
     try:
-        with conn.cursor() as cur:
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS scores (
-                  id SERIAL PRIMARY KEY,
-                  user_name TEXT NOT NULL,
-                  result    INT  NOT NULL,
-                  created_at TIMESTAMP DEFAULT NOW()
-                );
-            """)
-        conn.commit()
+        yield c
     finally:
-        pool.putconn(conn)
+        pool.putconn(c)
+
+def init_db() -> None:
+    """Create table if it doesn't exist."""
+    with conn() as c, c.cursor() as cur:
+        cur.execute(
+            "CREATE TABLE IF NOT EXISTS scores ("
+            "id SERIAL PRIMARY KEY, "
+            "user_name TEXT NOT NULL, "
+            "result INT NOT NULL, "
+            "created_at TIMESTAMP DEFAULT NOW()"
+            ")"
+        )
+        c.commit()
+
+def insert_score(user_name: str, result: int) -> None:
+    with conn() as c, c.cursor() as cur:
+        cur.execute(
+            "INSERT INTO scores (user_name, result) VALUES (%s, %s)",
+            (user_name, int(result)),
+        )
+        c.commit()
+
+def list_scores(limit: int = 50):
+    with conn() as c, c.cursor() as cur:
+        cur.execute(
+            "SELECT user_name, result, created_at "
+            "FROM scores ORDER BY id DESC LIMIT %s",
+            (limit,),
+        )
+        rows = cur.fetchall()
+        return [
+            {"user": u, "result": r, "created_at": str(ts)}
+            for (u, r, ts) in rows
+        ]
