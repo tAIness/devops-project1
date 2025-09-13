@@ -1,31 +1,16 @@
 # web/Dockerfile
-FROM nginx:1.27.5-alpine3.21
+FROM nginx:1.27.5-bookworm
 
-# add curl for healthcheck
-RUN apk add --no-cache curl
+# small utilities for healthcheck/debug
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl ca-certificates \
+ && rm -rf /var/lib/apt/lists/*
 
-# Upgrade vulnerable libraries to fixed versions
-RUN apk --no-cache add --upgrade \
-    'libxml2>=2.13.4-r6' \
-    'libxslt>=1.1.42-r3'
+# your nginx config (adjust path if you keep it elsewhere)
+# COPY nginx/default.conf /etc/nginx/conf.d/default.conf
 
-# Set web root and config locations
-ENV WEB_ROOT=/usr/share/nginx/html
-
-# Copy your Nginx config (assumes it's a full server block)
-# If your file is already a valid default server config, this is fine.
-COPY nginx.conf /etc/nginx/conf.d/default.conf
-
-# Copy static site (CSS + index.html)
-COPY static/ ${WEB_ROOT}/
-
-# Copy game (served under /game/)
-COPY game/ ${WEB_ROOT}/game/
-
-# Copy homepage "hero" images (baked in, not overridden by the volume)
-# Move your three images to web/assets/hero/ before building
-COPY assets/hero/ ${WEB_ROOT}/assets/hero/
+# static site
+COPY . /usr/share/nginx/html
 
 EXPOSE 80
-
-CMD ["nginx","-g","daemon off;"]
+HEALTHCHECK --interval=10s --timeout=3s --retries=5 CMD curl -fsS http://localhost/health || exit 1
