@@ -1,7 +1,17 @@
-from flask import Flask, request, jsonify
-import db  # local module (works when running from app/)
+import flask
+import requests
+import jsonify
+import db
+import psycopg2
+import json
 
-app = Flask(__name__)
+app = flask(__name__)
+
+with app.app_context():
+  try:
+    db.init_db()
+  except psycopg2.Error as exc:
+    app.logger.warning("DB init skipped: %s", exc)
 
 @app.get("/health")
 def health() -> tuple[str, int]:
@@ -9,18 +19,18 @@ def health() -> tuple[str, int]:
 
 @app.post("/score")
 def score():
-    payload = request.get_json(silent=True) or {}
+    payload = requests.get_json(silent=True) or {}
     user = (
         payload.get("user")
-        or request.form.get("user")
-        or request.args.get("user")
+        or requests.form.get("user")
+        or requests.args.get("user")
         or ""
     ).strip()
 
     result_raw = (
         payload.get("result")
-        or request.form.get("result")
-        or request.args.get("result")
+        or requests.form.get("result")
+        or requests.args.get("result")
     )
 
     if not user:
@@ -36,7 +46,7 @@ def score():
 
 @app.get("/scores")
 def scores():
-    limit = request.args.get("limit", default="50")
+    limit = requests.args.get("limit", default="50")
     try:
         limit_i = max(1, min(500, int(limit)))
     except ValueError:
