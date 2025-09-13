@@ -100,8 +100,7 @@ jobs:
           done
 
       - name: Run DB tests
-        working-directory: app
-        run: pytest -v tests/test_db.py --junitxml=pytest-results.xml
+        run: pytest -v app/tests/test_db.py --junitxml=pytest-results.xml
 
       - uses: actions/upload-artifact@v4
         if: always()
