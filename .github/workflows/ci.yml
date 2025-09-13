@@ -61,15 +61,15 @@ jobs:
     runs-on: ubuntu-latest
     services:
       postgres:
-        image: postgres:17.5
+        image: postgres:16
         env:
           POSTGRES_DB: supermario
           POSTGRES_USER: mario
-          POSTGRES_PASSWORD: secret
+          POSTGRES_PASSWORD: secret   # required!
         ports:
           - 5432:5432
         options: >-
-          --health-cmd="pg_isready -U mario -d secret"
+          --health-cmd="pg_isready -U mario -d supermario"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
@@ -93,20 +93,21 @@ jobs:
 
       - name: Wait for Postgres
         run: |
-          for i in {1..10}; do
-            pg_isready -h localhost -p 5432 -U mario && break
+          for i in {1..12}; do
+            pg_isready -h localhost -p 5432 -U mario -d supermario && break
             echo "Waiting for postgres..."
             sleep 5
           done
 
       - name: Run DB tests
-        run: pytest -v app/tests/test_db.py --junitxml=pytest-results.xml
+        working-directory: app
+        run: pytest -v tests/test_db.py --junitxml=pytest-results.xml
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: db-test-results
-          path: pytest-results.xml
+          path: app/pytest-results.xml
 
       # Uncomment when Alembic is ready
       # - name: Check migrations
