@@ -1,3 +1,6 @@
+# yamllint disable rule:line-length rule:indentation
+---
+
 name: CI (PR checks)
 
 on:
@@ -55,46 +58,46 @@ jobs:
         path: app/pytest-results.xml
 
   db-tests:
-    name: Run DB integration tests
     runs-on: ubuntu-latest
-    needs: [deploy-ec2]   # wait until deployment done
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: ${{ secrets.DB_NAME }}
+          POSTGRES_USER: ${{ secrets.DB_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd="pg_isready -U ${{ secrets.DB_USER }} -d ${{ secrets.DB_NAME }}"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
     env:
       DB_NAME: ${{ secrets.DB_NAME }}
       DB_USER: ${{ secrets.DB_USER }}
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-      DB_HOST: ${{ secrets.DB_HOST }}
+      DB_HOST: localhost
       DB_PORT: ${{ secrets.DB_PORT }}
     steps:
+        - uses: actions/checkout@v4
+        - uses: actions/setup-python@v5
+          with:
+            python-version: "3.12"
+        - run: pip install -r app/requirements.txt pytest psycopg2-binary
+        - run: pytest -v tests/test_db.py --junitxml=pytest-results.xml
+        - uses: actions/upload-artifact@v4
+          if: always()
+          with:
+            name: db-test-results
+            path: pytest-results.xml
 
-    - uses: actions/checkout@v4
+        - name: Run DB integration tests
+          run: |
+            pip install pytest psycopg2-binary
+            pytest -v tests/test_db.py
 
-    - name: Setup Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.12"
-
-    - name: Install dependencies
-      run: |
-         pip install -r app/requirements.txt pytest psycopg2-binary
-
-    - name: Run DB tests
-      run: |
-          pytest tests/test_db.py -v --junitxml=pytest-results.xml
-
-    - name: Upload test results
-      if: always()  # upload even if tests fail
-      uses: actions/upload-artifact@v4
-      with:
-        name: db-test-results
-        path: pytest-results.xml
-
-    - name: Run DB integration tests
-      run: |
-         pip install pytest psycopg2-binary
-         pytest -v tests/test_db.py
-
-    - name: Check migrations
-      run: alembic upgrade head
+        - name: Check migrations
+          run: alembic upgrade head
 
   build:
     runs-on: ubuntu-latest

@@ -142,13 +142,6 @@ jobs:
           tags: |
             ${{ env.DOCKERHUB_REPO_WEB }}:${{ env.IMAGE_TAG }}
 
-      - name: Test DB container locally
-        run: |
-          docker run --rm --network host \
-          -e PGPASSWORD="${DB_PASSWORD}" \
-           postgres:15 \
-           psql -h localhost -U "${DB_USER}" -d "${DB_NAME}" -c "SELECT 1;"
-
       - name: Mirror web to Nexus
         if: ${{ env.REGISTRY_URL != '' && env.REGISTRY_USERNAME != '' && env.REGISTRY_PASSWORD != '' }}
         shell: bash
