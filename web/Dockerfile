@@ -1,8 +1,13 @@
 # web/Dockerfile
-FROM nginx:1.27-alpine
+FROM nginx:1.27.5-alpine3.21
 
 # add curl for healthcheck
 RUN apk add --no-cache curl
+
+# Upgrade vulnerable libraries to fixed versions
+RUN apk --no-cache add --upgrade \
+    'libxml2>=2.13.4-r6' \
+    'libxslt>=1.1.42-r3'
 
 # Set web root and config locations
 ENV WEB_ROOT=/usr/share/nginx/html
