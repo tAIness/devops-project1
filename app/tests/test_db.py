@@ -6,7 +6,7 @@ def get_conn():
     dbname=os.getenv("DB_NAME", "supermario"),
     user=os.getenv("DB_USER", "mario"),
     password=os.getenv("DB_PASSWORD", "secret"),
-    host=os.getenv("DB_HOST", "db"),  # 👈 default to "db" not localhost
+    host=os.getenv("DB_HOST", "postgres"),
     port=os.getenv("DB_PORT", "5432"),
   )
 
