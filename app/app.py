@@ -50,7 +50,6 @@ def list_scores():
     except psycopg2.Error as exc:
         return jsonify({"error": "db_error", "detail": str(exc)}), 500
 
-
 if __name__ == "__main__":
     # Initialize table if needed (safe to call more than once)
     init_db()
