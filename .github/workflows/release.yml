@@ -191,41 +191,49 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y skopeo
 
-      - name: Mirror WEB to Nexus (HTTP dest via skopeo)
-        if: ${{ env.NEXUS_REGISTRY_DOMAIN != '' && env.NEXUS_USERNAME != '' && env.NEXUS_PASSWORD != '' }}
+      - name: Mirror WEB to Nexus on EC2 (no public 5000 needed)
+        uses: appleboy/ssh-action@v1.0.3
         env:
-          # pull from Docker Hub
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
           DOCKERHUB_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}
           DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-          IMAGE_TAG: ${{ env.IMAGE_TAG }}
-
-          # push to Nexus (HTTP)
-          NEXUS_REGISTRY_DOMAIN: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}   # e.g. ec2-...:5000  (no scheme)
           NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
           NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
-          NEXUS_REPO_WEB: ${{ secrets.NEXUS_REPO_WEB }}                 # e.g. myweb
-        run: |
-          set -euo pipefail
-          SRC_IMG="${DOCKERHUB_REPO_WEB}:${IMAGE_TAG}"
-          DST_IMG="${NEXUS_REGISTRY_DOMAIN}/${NEXUS_REPO_WEB}:${IMAGE_TAG}"
+          NEXUS_REPO_WEB: ${{ secrets.NEXUS_REPO_WEB }}  # e.g. myweb
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: ${{ secrets.EC2_SSH_PORT || '22' }}
+          envs: IMAGE_TAG,DOCKERHUB_REPO_WEB,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,NEXUS_USERNAME,NEXUS_PASSWORD,NEXUS_REPO_WEB
+          script: |
+            set -euo pipefail
+            # Install skopeo if missing
+            if ! command -v skopeo >/dev/null 2>&1; then
+              sudo apt-get update -y
+              sudo apt-get install -y skopeo
+            fi
 
-          # Hub -> Nexus; disable TLS on destination because Nexus is HTTP
-          skopeo copy \
-            --src-creds "${DOCKERHUB_USERNAME}:${DOCKERHUB_TOKEN}" \
-            --dest-creds "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
-            --src-tls-verify=true \
-            --dest-tls-verify=false \
-            docker://"${SRC_IMG}" docker://"${DST_IMG}"
+            SRC="docker://${DOCKERHUB_REPO_WEB}:${IMAGE_TAG}"
+            # Talk to Nexus locally (HTTP) so no SG change required
+            DST="docker://127.0.0.1:5000/${NEXUS_REPO_WEB}:${IMAGE_TAG}"
 
-          # optionally also push :latest
-          skopeo copy \
-            --src-creds "${DOCKERHUB_USERNAME}:${DOCKERHUB_TOKEN}" \
-            --dest-creds "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
-            --src-tls-verify=true \
-            --dest-tls-verify=false \
-            docker://"${SRC_IMG}" docker://"${NEXUS_REGISTRY_DOMAIN}/${NEXUS_REPO_WEB}:latest"
+            # Copy Hub -> Nexus; disable TLS on dest because Nexus is HTTP
+            skopeo copy \
+              --src-creds "${DOCKERHUB_USERNAME}:${DOCKERHUB_TOKEN}" \
+              --dest-creds "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
+              --src-tls-verify=true \
+              --dest-tls-verify=false \
+              "${SRC}" "${DST}"
 
+            # also tag :latest
+            skopeo copy \
+              --src-creds "${DOCKERHUB_USERNAME}:${DOCKERHUB_TOKEN}" \
+              --dest-creds "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
+              --src-tls-verify=true \
+              --dest-tls-verify=false \
+              "${SRC}" "docker://127.0.0.1:5000/${NEXUS_REPO_WEB}:latest"
   snyk-release:
     name: Snyk scan of images
     runs-on: ubuntu-latest
