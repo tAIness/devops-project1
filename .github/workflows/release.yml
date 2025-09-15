@@ -414,15 +414,17 @@ jobs:
 
             REG="${DEPLOY_REGISTRY:-hub}"
             if [ "$REG" = "nexus" ]; then
-              echo "${NEXUS_PASS}" | sudo docker login "${NEXUS_DOMAIN}" -u "${NEXUS_USER}" --password-stdin
-              IMAGE_REPO_APP="${NEXUS_REPO_APP}"
-              IMAGE_REPO_WEB="${NEXUS_REPO_WEB}"
+              # Talk to Nexus over localhost HTTP (no public 5000, no TLS)
+              NEXUS_LOCAL="127.0.0.1:5000"
+              echo "${NEXUS_PASS}" | sudo docker login "${NEXUS_LOCAL}" -u "${NEXUS_USER}" --password-stdin
+              IMAGE_REPO_APP="${NEXUS_LOCAL}/${NEXUS_REPO_APP}"
+              IMAGE_REPO_WEB="${NEXUS_LOCAL}/${NEXUS_REPO_WEB}"
             else
               echo "${DH_TOKEN}" | sudo docker login -u "${DH_USER}" --password-stdin
               IMAGE_REPO_APP="${DH_REPO_APP}"
               IMAGE_REPO_WEB="${DH_REPO_WEB}"
             fi
-
+            
             # Write or update .env for compose (app, web, db)
             {
               echo "IMAGE_REPO_APP=${IMAGE_REPO_APP}"
