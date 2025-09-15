@@ -192,35 +192,39 @@ jobs:
           sudo apt-get install -y skopeo
 
       - name: Mirror WEB to Nexus (HTTP dest via skopeo)
-        if: ${{ secrets.NEXUS_REGISTRY_DOMAIN != '' && secrets.NEXUS_USERNAME != '' && secrets.NEXUS_PASSWORD != '' }}
+        if: ${{ env.NEXUS_REGISTRY_DOMAIN != '' && env.NEXUS_USERNAME != '' && env.NEXUS_PASSWORD != '' }}
         env:
-          # source (Docker Hub)
-          SRC_IMG: ${{ secrets.DOCKERHUB_REPO_WEB }}:${{ env.IMAGE_TAG }}
-          HUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
-          HUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          # pull from Docker Hub
+          DOCKERHUB_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}
+          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
+          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+          IMAGE_TAG: ${{ env.IMAGE_TAG }}
 
-          # destination (Nexus)
-          DST_IMG: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}/${{ secrets.NEXUS_REPO_WEB }}:${{ env.IMAGE_TAG }}
-          NEXUS_USER: ${{ secrets.NEXUS_USERNAME }}
-          NEXUS_PASS: ${{ secrets.NEXUS_PASSWORD }}
+          # push to Nexus (HTTP)
+          NEXUS_REGISTRY_DOMAIN: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}   # e.g. ec2-...:5000  (no scheme)
+          NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
+          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
+          NEXUS_REPO_WEB: ${{ secrets.NEXUS_REPO_WEB }}                 # e.g. myweb
         run: |
           set -euo pipefail
-          # Copy image from Docker Hub -> Nexus; disable TLS on dest (Nexus is HTTP)
-          skopeo copy \
-            --src-creds "${HUB_USER}:${HUB_TOKEN}" \
-            --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
-            --src-tls-verify=true \
-            --dest-tls-verify=false \
-            docker://${SRC_IMG} docker://${DST_IMG}
+          SRC_IMG="${DOCKERHUB_REPO_WEB}:${IMAGE_TAG}"
+          DST_IMG="${NEXUS_REGISTRY_DOMAIN}/${NEXUS_REPO_WEB}:${IMAGE_TAG}"
 
-          # Optionally also tag/push 'latest' in Nexus
+          # Hub -> Nexus; disable TLS on destination because Nexus is HTTP
           skopeo copy \
-            --src-creds "${HUB_USER}:${HUB_TOKEN}" \
-            --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
+            --src-creds "${DOCKERHUB_USERNAME}:${DOCKERHUB_TOKEN}" \
+            --dest-creds "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
             --src-tls-verify=true \
             --dest-tls-verify=false \
-            docker://${SRC_IMG} docker://${{ secrets.NEXUS_REGISTRY_DOMAIN }}/${{ secrets.NEXUS_REPO_WEB }}:latest
-  
+            docker://"${SRC_IMG}" docker://"${DST_IMG}"
+
+          # optionally also push :latest
+          skopeo copy \
+            --src-creds "${DOCKERHUB_USERNAME}:${DOCKERHUB_TOKEN}" \
+            --dest-creds "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
+            --src-tls-verify=true \
+            --dest-tls-verify=false \
+            docker://"${SRC_IMG}" docker://"${NEXUS_REGISTRY_DOMAIN}/${NEXUS_REPO_WEB}:latest"
 
   snyk-release:
     name: Snyk scan of images
