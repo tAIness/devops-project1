@@ -186,22 +186,41 @@ jobs:
             if [ "$i" = 5 ]; then echo "Push failed after retries"; exit 1; fi
           done
 
-      - name: Mirror web to Nexus
-        if: ${{ env.REGISTRY_URL != '' && env.REGISTRY_USERNAME != '' && env.REGISTRY_PASSWORD != '' }}
-        shell: bash
+      - name: Install skopeo
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y skopeo
+
+      - name: Mirror WEB to Nexus (HTTP dest via skopeo)
+        if: ${{ secrets.NEXUS_REGISTRY_DOMAIN != '' && secrets.NEXUS_USERNAME != '' && secrets.NEXUS_PASSWORD != '' }}
         env:
-          REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
-          REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
-          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
-          NEXUS_REPO_WEB: ${{ secrets.NEXUS_REPO_WEB }}
+          # source (Docker Hub)
+          SRC_IMG: ${{ secrets.DOCKERHUB_REPO_WEB }}:${{ env.IMAGE_TAG }}
+          HUB_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+          HUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+          # destination (Nexus)
+          DST_IMG: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}/${{ secrets.NEXUS_REPO_WEB }}:${{ env.IMAGE_TAG }}
+          NEXUS_USER: ${{ secrets.NEXUS_USERNAME }}
+          NEXUS_PASS: ${{ secrets.NEXUS_PASSWORD }}
         run: |
           set -euo pipefail
-          echo "$REGISTRY_PASSWORD" | docker login "$REGISTRY_URL" -u "$REGISTRY_USERNAME" --password-stdin
-          SRC="${DOCKERHUB_REPO_WEB}:${IMAGE_TAG}"
-          DST="${NEXUS_REPO_WEB}:${IMAGE_TAG}"
-          docker pull "$SRC" || true
-          docker tag  "$SRC" "$DST"
-          docker push "$DST"
+          # Copy image from Docker Hub -> Nexus; disable TLS on dest (Nexus is HTTP)
+          skopeo copy \
+            --src-creds "${HUB_USER}:${HUB_TOKEN}" \
+            --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
+            --src-tls-verify=true \
+            --dest-tls-verify=false \
+            docker://${SRC_IMG} docker://${DST_IMG}
+
+          # Optionally also tag/push 'latest' in Nexus
+          skopeo copy \
+            --src-creds "${HUB_USER}:${HUB_TOKEN}" \
+            --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
+            --src-tls-verify=true \
+            --dest-tls-verify=false \
+            docker://${SRC_IMG} docker://${{ secrets.NEXUS_REGISTRY_DOMAIN }}/${{ secrets.NEXUS_REPO_WEB }}:latest
+  
 
   snyk-release:
     name: Snyk scan of images
