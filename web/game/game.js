@@ -1,6 +1,6 @@
 // Super Mario–style mini game (original art).
 // Requires a <canvas id="game" width="960" height="480"></canvas> in /game/index.html
-// Also works with optional buttons: <button id="startBtn">Start</button> <button id="resetBtn">Reset</button>
+// Optional buttons supported: <button id="startBtn">Start</button> <button id="resetBtn">Reset</button>
 
 (() => {
   // --- Boot / DOM ------------------------------------------------------------
@@ -11,8 +11,11 @@
   }
   const c = canvas.getContext('2d');
 
-  // Player name is per-run (not persisted)
-  let playerName = null;
+  // --- Player / Name input state --------------------------------------------
+  let playerName = null;            // per-run (not persisted)
+  let capturingName = false;        // true when the name prompt is active
+  let nameBuffer = '';              // typed name content
+  const NAME_MAX_LEN = 24;
 
   // --- Palette / Constants ---------------------------------------------------
   const PAL = {
@@ -30,7 +33,10 @@
     coinStroke: '#916d12',
     hud: '#1e2430',
     stroke: 'rgba(0,0,0,0.35)',
-    overlay: 'rgba(255,255,255,0.45)',
+    overlay: 'rgba(0,0,0,0.45)',
+    panel: '#ffffff',
+    panelStroke: '#d0d7de',
+    primary: '#0d6efd',
   };
 
   const GROUND_Y = canvas.height - 80;
@@ -59,137 +65,98 @@
   // --- State / Timing --------------------------------------------------------
   let running = false;
   const keys = new Set();
-  let animT = 0;    // walk cycle timer
+  let animT = 0;     // walk cycle timer
   let startTime = 0; // game start timestamp
 
-  // --- Name Overlay ----------------------------------------------------------
-  function showNameOverlay(onConfirm) {
-    // Remove any existing overlay first
-    const old = document.getElementById('nameOverlay');
-    if (old) old.remove();
-
-    const overlay = document.createElement('div');
-    overlay.id = 'nameOverlay';
-    Object.assign(overlay.style, {
-      position: 'fixed',
-      inset: '0',
-      background: 'rgba(0,0,0,0.35)',
-      display: 'grid',
-      placeItems: 'center',
-      zIndex: '9999',
-    });
-
-    const card = document.createElement('form');
-    Object.assign(card.style, {
-      background: '#ffffff',
-      padding: '18px 20px',
-      borderRadius: '14px',
-      boxShadow: '0 10px 30px rgba(0,0,0,0.2)',
-      minWidth: '260px',
-      fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
-    });
-
-    const title = document.createElement('div');
-    title.textContent = 'Enter your player name';
-    Object.assign(title.style, { fontWeight: '700', marginBottom: '10px', color: '#1e2430' });
-
-    const input = document.createElement('input');
-    input.type = 'text';
-    input.placeholder = 'Your name';
-    input.required = false; // allow empty -> anonymous
-    input.autocomplete = 'off';
-    input.spellcheck = false;
-    Object.assign(input.style, {
-      width: '100%', padding: '10px 12px', borderRadius: '10px',
-      border: '1px solid #d0d7de', outline: 'none', fontSize: '14px',
-      marginBottom: '12px',
-    });
-
-    const row = document.createElement('div');
-    Object.assign(row.style, { display: 'flex', gap: '8px', justifyContent: 'flex-end' });
-
-    const cancelBtn = document.createElement('button');
-    cancelBtn.type = 'button';
-    cancelBtn.textContent = 'Cancel';
-    Object.assign(cancelBtn.style, {
-      padding: '8px 12px', borderRadius: '10px', border: '1px solid #d0d7de', background: '#fff', cursor: 'pointer'
-    });
-
-    const okBtn = document.createElement('button');
-    okBtn.type = 'submit';
-    okBtn.textContent = 'Start';
-    Object.assign(okBtn.style, {
-      padding: '8px 12px', borderRadius: '10px', border: '1px solid #0d6efd', background: '#0d6efd',
-      color: '#fff', cursor: 'pointer', fontWeight: '600'
-    });
-
-    card.appendChild(title);
-    card.appendChild(input);
-    row.appendChild(cancelBtn);
-    row.appendChild(okBtn);
-    card.appendChild(row);
-    overlay.appendChild(card);
-    document.body.appendChild(overlay);
-
-    // Focus behavior
-    setTimeout(() => input.focus(), 0);
-
-    cancelBtn.onclick = () => {
-      // If cancel, still allow starting as anonymous (or simply close and not start)
-      input.value = '';
-      submitHandler(new Event('submit')); // start as anonymous for convenience
-    };
-
-    function submitHandler(e) {
-      if (e) e.preventDefault();
-      playerName = (input.value && input.value.trim()) ? input.value.trim() : 'anonymous';
-      overlay.remove();
-      onConfirm?.(playerName);
-    }
-
-    card.addEventListener('submit', submitHandler);
+  // --- Controls --------------------------------------------------------------
+  function openNamePrompt() {
+    capturingName = true;
+    nameBuffer = '';
+    draw(); // render prompt immediately
   }
 
-  // --- Controls --------------------------------------------------------------
   function start() {
-    if (running) return;
-    showNameOverlay(() => {
-      startTime = performance.now();
-      running = true;
-      requestAnimationFrame(loop);
-    });
+    if (running || capturingName) return;
+    openNamePrompt();
+  }
+
+  function confirmNameAndStart() {
+    playerName = (nameBuffer.trim() || 'anonymous');
+    startTime = performance.now();
+    running = true;
+    capturingName = false;
+    requestAnimationFrame(loop);
+  }
+
+  function cancelNamePrompt() {
+    nameBuffer = '';
+    playerName = 'anonymous';
+    startTime = performance.now();
+    running = true;
+    capturingName = false;
+    requestAnimationFrame(loop);
   }
 
   function reset(full = true) {
     Object.assign(player, { x: 80, y: GROUND_Y - 44, vx: 0, vy: 0, onGround: true, alive: true });
     if (full) player.score = 0;
     coins.forEach((co) => (co.taken = false));
+    running = false;          // ensure we have to start again -> triggers name prompt next time
     draw();
   }
 
+  // Keyboard handling (gameplay + name prompt)
   addEventListener('keydown', (e) => {
+    // Name entry mode
+    if (capturingName) {
+      const k = e.key;
+      if (k === 'Enter') { e.preventDefault(); confirmNameAndStart(); return; }
+      if (k === 'Escape') { e.preventDefault(); cancelNamePrompt(); return; }
+      if (k === 'Backspace') {
+        e.preventDefault();
+        nameBuffer = nameBuffer.slice(0, -1);
+        draw();
+        return;
+      }
+      // Accept basic printable chars
+      if (k.length === 1 && !e.ctrlKey && !e.metaKey && nameBuffer.length < NAME_MAX_LEN) {
+        // Allow letters, digits, space, underscore, hyphen, period
+        if (/^[a-zA-Z0-9 _\-.]$/.test(k)) {
+          nameBuffer += k;
+          draw();
+        }
+      }
+      // prevent scroll etc while in prompt
+      if ([' ', 'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'Tab'].includes(k)) e.preventDefault();
+      return;
+    }
+
+    // Gameplay mode
     keys.add(e.key);
     if ((e.key === ' ' || e.key === 'ArrowUp') && player.onGround && running) {
       player.vy = JUMP_VELOCITY;
       player.onGround = false;
       e.preventDefault();
     }
+    // Start game if not running (opens prompt)
     if (!running && (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'Enter')) {
       e.preventDefault();
       start();
     }
   });
 
-  addEventListener('keyup', (e) => keys.delete(e.key));
+  addEventListener('keyup', (e) => {
+    if (capturingName) { e.preventDefault(); return; }
+    keys.delete(e.key);
+  });
 
-  // Start on first click
-  addEventListener('click', () => start(), { once: true });
-  canvas.addEventListener('click', () => start(), { once: true });
+  // Click to start when not running
+  canvas.addEventListener('click', () => { if (!running && !capturingName) start(); });
 
   // Optional buttons
   window.addEventListener('DOMContentLoaded', () => {
     const startBtn = document.getElementById('startBtn');
-    if (startBtn) startBtn.onclick = start;
+    if (startBtn) startBtn.onclick = () => { if (!running && !capturingName) start(); };
     const resetBtn = document.getElementById('resetBtn');
     if (resetBtn) resetBtn.onclick = () => reset(true);
   });
@@ -208,6 +175,7 @@
       console.error('Failed to record score', e);
     }
   }
+  // Expose for manual testing from console
   window.postScore = postScore;
 
   // --- Drawing ---------------------------------------------------------------
@@ -244,22 +212,69 @@
     }
   }
 
+  function drawNamePromptPanel() {
+    // dim background
+    c.fillStyle = PAL.overlay;
+    c.fillRect(0, 0, canvas.width, canvas.height);
+
+    // panel box
+    const panelW = 420, panelH = 160;
+    const px = (canvas.width - panelW) / 2;
+    const py = (canvas.height - panelH) / 2;
+    c.fillStyle = PAL.panel;
+    c.fillRect(px, py, panelW, panelH);
+    c.strokeStyle = PAL.panelStroke; c.lineWidth = 2; c.strokeRect(px, py, panelW, panelH);
+
+    // title
+    c.fillStyle = PAL.hud;
+    c.font = 'bold 22px system-ui, sans-serif';
+    c.fillText('Enter your player name', px + 20, py + 36);
+
+    // input box background
+    const ibx = px + 20, iby = py + 60, ibw = panelW - 40, ibh = 40;
+    c.strokeStyle = PAL.panelStroke; c.lineWidth = 2;
+    c.strokeRect(ibx, iby, ibw, ibh);
+
+    // caret blink
+    const caretOn = Math.floor(performance.now() / 500) % 2 === 0;
+    const display = nameBuffer || '';
+    c.fillStyle = PAL.hud;
+    c.font = '18px system-ui, sans-serif';
+    c.fillText(display, ibx + 12, iby + 26);
+    if (caretOn) {
+      const tw = c.measureText(display).width;
+      c.fillRect(ibx + 12 + tw + 2, iby + 8, 2, ibh - 16);
+    }
+
+    // hint row
+    c.fillStyle = PAL.hud;
+    c.font = '14px system-ui, sans-serif';
+    c.fillText('Enter: Start   Esc: Anonymous   Max 24 chars', px + 20, py + panelH - 20);
+  }
+
   function drawHUD() {
     c.fillStyle = PAL.hud;
     c.font = '16px system-ui, sans-serif';
     c.fillText(`Score: ${player.score}`, 16, 24);
+    if (playerName) c.fillText(`Player: ${playerName}`, 16, 44);
 
-    if (!running) {
-      c.fillStyle = PAL.overlay; c.fillRect(0, 0, canvas.width, canvas.height);
+    if (!running && !capturingName) {
+      c.fillStyle = 'rgba(255,255,255,0.45)';
+      c.fillRect(0, 0, canvas.width, canvas.height);
       c.fillStyle = PAL.hud; c.font = 'bold 24px system-ui, sans-serif';
-      c.fillText('Press Start to play', canvas.width / 2 - 110, canvas.height / 2);
+      c.fillText('Press Space / Enter or Click to Start', canvas.width / 2 - 230, canvas.height / 2);
     }
+
+    if (capturingName) {
+      drawNamePromptPanel();
+    }
+
     if (!player.alive) {
-      c.fillStyle = PAL.overlay; c.fillRect(0, 0, canvas.width, canvas.height);
+      c.fillStyle = 'rgba(255,255,255,0.45)'; c.fillRect(0, 0, canvas.width, canvas.height);
       c.fillStyle = PAL.hud; c.font = 'bold 28px system-ui, sans-serif';
       c.fillText('Game Over', canvas.width / 2 - 70, canvas.height / 2 - 10);
       c.font = '16px system-ui, sans-serif';
-      c.fillText('Click Reset to try again', canvas.width / 2 - 98, canvas.height / 2 + 18);
+      c.fillText('Press Space / Enter or Click to Start', canvas.width / 2 - 170, canvas.height / 2 + 18);
     }
   }
 
