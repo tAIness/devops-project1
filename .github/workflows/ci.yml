@@ -211,12 +211,29 @@ jobs:
         env:
           BASE_URL: http://127.0.0.1:8081
 
+      - name: Debug list e2e allure results
+        if: always()
+        run: |
+          ls -lah allure-results || true
+          find allure-results -type f | wc -l || true     
+
+      - name: Prepare e2e results folder for artifact
+        if: always()
+        run: |
+          rm -rf e2e
+          mkdir -p e2e
+          if [ -d allure-results ]; then
+            mv allure-results e2e/allure-results
+          else
+            mkdir -p e2e/allure-results
+          fi
+
       - name: Upload e2e Allure results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: allure-results-e2e
-          path: allure-results
+          path: e2e/allure-results
 
   build:
     runs-on: ubuntu-latest
