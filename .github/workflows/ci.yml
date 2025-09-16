@@ -6,6 +6,9 @@ name: CI (PR checks)
 on:
   pull_request:
     branches:
+      - main
+  push:
+    branches:
       - feature/new-apps
 
 permissions:
@@ -67,10 +70,8 @@ jobs:
           POSTGRES_DB: supermario
           POSTGRES_USER: mario
           POSTGRES_PASSWORD: secret
-        ports:
-          - []
         options: >-
-          --health-cmd="pg_isready -h 127.0.0.1 -p 5432 -U mario -d supermario"
+          --health-cmd="pg_isready -h postgres -p 5432 -U mario -d supermario"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
@@ -109,6 +110,78 @@ jobs:
       #   run: |
       #     pip install alembic
       #     alembic upgrade head
+
+e2e:
+  runs-on: ubuntu-latest
+  timeout-minutes: 20
+  services:
+    db:
+      image: postgres:15
+      env:
+        POSTGRES_DB: supermario
+        POSTGRES_USER: mario
+        POSTGRES_PASSWORD: secret
+      options: >-
+        --health-cmd="pg_isready -h localhost -p 5432 -U mario -d supermario"
+        --health-interval=10s
+        --health-timeout=5s
+        --health-retries=5
+      ports:
+        - 5432:5432
+  steps:
+    - uses: actions/checkout@v4
+
+    # Build images
+    - uses: docker/setup-buildx-action@v3
+    - uses: docker/build-push-action@v6
+      with:
+        context: app
+        file: app/Dockerfile
+        load: true
+        tags: local/app:e2e
+    - uses: docker/build-push-action@v6
+      with:
+        context: web
+        file: web/Dockerfile
+        load: true
+        tags: local/web:e2e
+
+    # Run the stack
+    - name: Start app container
+      run: |
+        docker run -d --name app \
+          --network host \
+          -e DATABASE_URL="postgresql://mario:secret@127.0.0.1:5432/supermario" \
+          -e PORT=8000 \
+          local/app:e2e
+    - name: Wait for app
+      run: |
+        for i in {1..30}; do
+          if curl -fsS http://127.0.0.1:8000/health >/dev/null; then exit 0; fi
+          sleep 2
+        done
+        echo "App didn't become healthy"; docker logs app; exit 1
+
+    - name: Start web container
+      run: |
+        docker run -d --name web --network host local/web:e2e
+    - name: Wait for web
+      run: |
+        for i in {1..30}; do
+          if curl -fsSI http://127.0.0.1:80 | grep -q "200 OK"; then exit 0; fi
+          sleep 2
+        done
+        echo "Web didn't become ready"; docker logs web; exit 1
+
+    # Playwright
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 20
+        cache: npm
+    - run: npm ci
+    - uses: microsoft/playwright-github-action@v1
+    - run: npx playwright test
+
 
   build:
     runs-on: ubuntu-latest
