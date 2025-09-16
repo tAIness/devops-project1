@@ -4,13 +4,12 @@ name: CI (PR checks)
 
 on:
   pull_request:
-    branches:
-      - main
+    branches: [ main ]
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
+  pages: write        # <-- needed for deploy-pages
+  id-token: write     # <-- needed for deploy-pages OIDC
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -52,7 +51,6 @@ jobs:
         run: |
           python -m pip install -U pip
           pip install -r app/requirements.txt
-          # allure for pytest
           pip install allure-pytest
           if [ -f app/tests/requirements.txt ]; then pip install -r app/tests/requirements.txt; fi
       - name: Run unit tests (exclude DB) + Allure
@@ -246,7 +244,7 @@ jobs:
       severity: critical
       upload_artifacts: true
 
-  # Merge Allure results from all jobs and publish a single HTML report artifact
+  # Merge Allure results from all jobs and publish an HTML report to GitHub Pages
   allure-report:
     name: Build Allure report (merged)
     runs-on: ubuntu-latest
@@ -269,60 +267,29 @@ jobs:
           name: allure-results-e2e
           path: results/e2e
 
-      # Merge results into a single folder the action can consume
-      - name: Merge Allure result folders
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p merged-results
-          shopt -s nullglob
-          for d in results/*/allure-results; do
-            echo "Merging $d"
-            cp -R "$d"/. merged-results/
-          done
-          echo "Total files:"; ls -l merged-results | wc -l
-
-      # Generate the report (correct inputs for this action)
+      # Generate report (CLI bundled in the action)
       - name: Generate Allure report
         uses: simple-elf/allure-report-action@v1.7
         with:
-          allure_results: merged-results
-          allure_report: allure-report
+          allure_results: "results/unit/allure-results,results/db/allure-results,results/e2e/allure-results"
+          allure_report: "public/allure/${{ github.run_id }}"
+          # (Optional) keep history of last N reports under public/allure/history
+          keep_reports: 10
 
-      # Upload the HTML report as a downloadable artifact
-      - name: Upload merged Allure HTML
-        uses: actions/upload-artifact@v4
-        with:
-          name: allure-report
-          path: allure-report
-          if-no-files-found: error
-
-  publish-allure:
-    name: Publish Allure to GitHub Pages
-    runs-on: ubuntu-latest
-    needs: [ allure-report ]
-    if: always()
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: allure-report
-          path: ./allure-report
-
-      # Package the HTML as a Pages artifact
+      # Upload the static site artifact named "github-pages"
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: ./allure-report
+          path: public
 
-      # Deploy the artifact to GitHub Pages
-      - name: Deploy to GitHub Pages
-        id: deploy
+  # Publish to GitHub Pages (needs the artifact from 'allure-report')
+  deploy-pages:
+    if: always()
+    needs: [allure-report]
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
         uses: actions/deploy-pages@v4
-
-      - name: Add link to job summary
-        run: |
-          echo "## Allure Report" >> $GITHUB_STEP_SUMMARY
-          echo "${{ steps.deploy.outputs.page_url }}index.html" >> $GITHUB_STEP_SUMMARY
-  
