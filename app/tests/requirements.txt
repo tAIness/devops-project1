@@ -1,4 +1,5 @@
 pytest
 pylint
 psycopg2-binary
+allure-pytest==2.13.5
 

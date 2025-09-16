@@ -1,5 +1,6 @@
 // Super Mario–style mini game (original art).
 // Requires a <canvas id="game" width="960" height="480"></canvas> in /game/index.html
+// Also works with optional buttons: <button id="startBtn">Start</button> <button id="resetBtn">Reset</button>
 
 (() => {
   // --- Boot / DOM ------------------------------------------------------------
@@ -10,14 +11,8 @@
   }
   const c = canvas.getContext('2d');
 
-  // Ensure we have a name (also prompted by index.html, but keep a fallback)
-  (function ensureName() {
-    let name = localStorage.getItem('playerName');
-    if (!name) {
-      name = prompt('Enter your player name:');
-      if (name) localStorage.setItem('playerName', name);
-    }
-  })();
+  // Player name is per-run (not persisted)
+  let playerName = null;
 
   // --- Palette / Constants ---------------------------------------------------
   const PAL = {
@@ -67,13 +62,102 @@
   let animT = 0;    // walk cycle timer
   let startTime = 0; // game start timestamp
 
+  // --- Name Overlay ----------------------------------------------------------
+  function showNameOverlay(onConfirm) {
+    // Remove any existing overlay first
+    const old = document.getElementById('nameOverlay');
+    if (old) old.remove();
+
+    const overlay = document.createElement('div');
+    overlay.id = 'nameOverlay';
+    Object.assign(overlay.style, {
+      position: 'fixed',
+      inset: '0',
+      background: 'rgba(0,0,0,0.35)',
+      display: 'grid',
+      placeItems: 'center',
+      zIndex: '9999',
+    });
+
+    const card = document.createElement('form');
+    Object.assign(card.style, {
+      background: '#ffffff',
+      padding: '18px 20px',
+      borderRadius: '14px',
+      boxShadow: '0 10px 30px rgba(0,0,0,0.2)',
+      minWidth: '260px',
+      fontFamily: 'system-ui, -apple-system, Segoe UI, Roboto, sans-serif',
+    });
+
+    const title = document.createElement('div');
+    title.textContent = 'Enter your player name';
+    Object.assign(title.style, { fontWeight: '700', marginBottom: '10px', color: '#1e2430' });
+
+    const input = document.createElement('input');
+    input.type = 'text';
+    input.placeholder = 'Your name';
+    input.required = false; // allow empty -> anonymous
+    input.autocomplete = 'off';
+    input.spellcheck = false;
+    Object.assign(input.style, {
+      width: '100%', padding: '10px 12px', borderRadius: '10px',
+      border: '1px solid #d0d7de', outline: 'none', fontSize: '14px',
+      marginBottom: '12px',
+    });
+
+    const row = document.createElement('div');
+    Object.assign(row.style, { display: 'flex', gap: '8px', justifyContent: 'flex-end' });
+
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'Cancel';
+    Object.assign(cancelBtn.style, {
+      padding: '8px 12px', borderRadius: '10px', border: '1px solid #d0d7de', background: '#fff', cursor: 'pointer'
+    });
+
+    const okBtn = document.createElement('button');
+    okBtn.type = 'submit';
+    okBtn.textContent = 'Start';
+    Object.assign(okBtn.style, {
+      padding: '8px 12px', borderRadius: '10px', border: '1px solid #0d6efd', background: '#0d6efd',
+      color: '#fff', cursor: 'pointer', fontWeight: '600'
+    });
+
+    card.appendChild(title);
+    card.appendChild(input);
+    row.appendChild(cancelBtn);
+    row.appendChild(okBtn);
+    card.appendChild(row);
+    overlay.appendChild(card);
+    document.body.appendChild(overlay);
+
+    // Focus behavior
+    setTimeout(() => input.focus(), 0);
+
+    cancelBtn.onclick = () => {
+      // If cancel, still allow starting as anonymous (or simply close and not start)
+      input.value = '';
+      submitHandler(new Event('submit')); // start as anonymous for convenience
+    };
+
+    function submitHandler(e) {
+      if (e) e.preventDefault();
+      playerName = (input.value && input.value.trim()) ? input.value.trim() : 'anonymous';
+      overlay.remove();
+      onConfirm?.(playerName);
+    }
+
+    card.addEventListener('submit', submitHandler);
+  }
+
   // --- Controls --------------------------------------------------------------
   function start() {
-    if (!running) {
+    if (running) return;
+    showNameOverlay(() => {
       startTime = performance.now();
       running = true;
       requestAnimationFrame(loop);
-    }
+    });
   }
 
   function reset(full = true) {
@@ -90,7 +174,10 @@
       player.onGround = false;
       e.preventDefault();
     }
-    if (!running && (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'Enter')) start();
+    if (!running && (e.key === ' ' || e.key === 'ArrowUp' || e.key === 'Enter')) {
+      e.preventDefault();
+      start();
+    }
   });
 
   addEventListener('keyup', (e) => keys.delete(e.key));
@@ -109,7 +196,7 @@
 
   // --- Net: Post score to backend -------------------------------------------
   async function postScore(milliseconds) {
-    const user_name = localStorage.getItem('playerName') || 'anonymous';
+    const user_name = playerName || 'anonymous';
     const result = Math.max(0, Math.floor(milliseconds));
     try {
       await fetch('/api/score', {
@@ -121,7 +208,6 @@
       console.error('Failed to record score', e);
     }
   }
-  // Expose for debugging/manual calls
   window.postScore = postScore;
 
   // --- Drawing ---------------------------------------------------------------

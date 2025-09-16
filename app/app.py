@@ -64,13 +64,13 @@ def api_leaderboard():
             cursor_factory=psycopg2.extras.DictCursor
         ) as cur:
             cur.execute(
-                """
-                SELECT user_name, MIN(result) AS best
-                FROM scores
-                GROUP BY user_name
-                ORDER BY best ASC, user_name ASC
-                LIMIT 20
-                """
+              """
+               SELECT user_name, MIN(result) AS best
+               FROM scores
+               GROUP BY user_name
+               ORDER BY best ASC, user_name ASC
+               LIMIT 20
+              """
             )
             rows = [{"user_name": r["user_name"], "best": int(r["best"])} for r in cur.fetchall()]
         return jsonify(rows), 200
