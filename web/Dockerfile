@@ -1,5 +1,12 @@
 FROM nginx:1.27.5-alpine3.21
 
+# Remove default site; add curl; **upgrade vulnerable libs**
+RUN set -eux; \
+    apk update; \
+    apk add --no-cache curl; \
+    rm -f /usr/share/nginx/html/index.html /etc/nginx/conf.d/default.conf; \
+    apk upgrade --no-cache libxml2 libxslt
+
 # tools & remove the default site so only your config is used
 RUN set -eux; apk add --no-cache curl; rm -f /usr/share/nginx/html/index.html /etc/nginx/conf.d/default.conf
 
