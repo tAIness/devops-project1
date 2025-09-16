@@ -1,17 +1,22 @@
-import { defineConfig } from '@playwright/test';
+// playwright.config.ts
+import { defineConfig, devices } from '@playwright/test';
 
-let process;
-// @ts-ignore
+// ✅ process is a Node global – no import needed
+const BASE_URL = process.env.BASE_URL || 'http://127.0.0.1:8081';
+
 export default defineConfig({
-  reporter: [
-    ['list'],                                     // console
-    ['allure-playwright', {
-      outputFolder: 'allure-results',             // default name; we’ll upload this
-      detail: true,
-      suiteTitle: false
-   }]
-  ],
+  testDir: './e2e',                 // adjust if your tests live elsewhere
+  timeout: 30_000,
   use: {
-    baseURL: process.env.BASE_URL || 'http://127.0.0.1:8081',
-  }
+    baseURL: BASE_URL,
+    trace: 'on-first-retry',
+  },
+  reporter: [
+    ['line'],
+    ['allure-playwright'],          // Allure reporter
+  ],
+  projects: [
+    { name: 'chromium', use: { ...devices['Desktop Chrome'] } },
+    // add firefox/webkit if you want
+  ],
 });
