@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Super Mario — Leaderboard</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link rel="preload" href="/css/site.css" as="style" />
+  <link rel="stylesheet" href="/css/site.css" />
+  <style>
+    .wrap { max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: .6rem .8rem; border-bottom: 1px solid #eee; text-align: left; }
+    th { background: #fafafa; }
+    .topbar{display:flex; align-items:center; gap:1rem; margin-bottom:1rem;}
+    .topbar a{font-size:.95rem; text-decoration:none;}
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <div class="topbar">
+      <h1 style="margin:0;">Leaderboard</h1>
+      <a href="/" aria-label="Back to home">← Back</a>
+      <a href="/game/" aria-label="Play the game">Play →</a>
+      <a href="/api/leaderboard" target="_blank" rel="noopener">Raw JSON</a>
+    </div>
+
+    <table id="board">
+      <thead>
+        <tr><th>#</th><th>Gamer</th><th>Best (ms)</th><th>Updated</th></tr>
+      </thead>
+      <tbody></tbody>
+    </table>
+  </div>
+
+  <script>
+    async function loadLeaderboard() {
+      try {
+        const res = await fetch('/api/leaderboard');
+        if (!res.ok) throw new Error('HTTP ' + res.status);
+        const data = await res.json();
+        const tb = document.querySelector('#board tbody');
+        tb.innerHTML = '';
+        data.forEach((row, i) => {
+          const tr = document.createElement('tr');
+          const updated = row.updated_at || row.created_at || '';
+          tr.innerHTML = `
+            <td>${i + 1}</td>
+            <td>${row.user_name ?? row.player ?? '-'}</td>
+            <td>${row.best ?? row.ms ?? '-'}</td>
+            <td>${updated}</td>
+          `;
+          tb.appendChild(tr);
+        });
+      } catch (e) {
+        console.error(e);
+        document.querySelector('#board tbody').innerHTML =
+          '<tr><td colspan="4">Failed to load leaderboard.</td></tr>';
+      }
+    }
+    loadLeaderboard();
+    // optional auto-refresh every 10s
+    setInterval(loadLeaderboard, 10000);
+  </script>
+</body>
+</html>

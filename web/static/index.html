@@ -4,30 +4,32 @@
   <meta charset="utf-8" />
   <title>Super Mario — Static Site</title>
   <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <!-- CSS (we copy web/static/css -> /css in the image) -->
   <link rel="preload" href="/css/site.css" as="style" />
   <link rel="stylesheet" href="/css/site.css" />
 </head>
 <body>
   <header class="site-header">
     <h1>Super Mario</h1>
-    <p>Click the card to play a Mario-style mini-game.</p>
+    <p>Click a card to play the game, view the leaderboard, or browse images.</p>
   </header>
 
   <main class="grid">
-    <!-- Play card (unchanged) -->
+    <!-- Play card -->
     <a class="card" href="/game/" title="Play the game!">
       <img src="/assets/hero/mario1.jpg" alt="Super Mario standing" />
       <div class="card-title">Play Super Mario</div>
     </a>
-
-    <!-- Gallery card now links to the images directory -->
+    <!-- Gallery card -->
     <a class="card" href="/images/" title="Open the Mario gallery">
-      <img src="/assets/hero/mario2.jpg" alt="Mario jumping" />
+      <img src="/assets/hero/mario3.jpg" alt="Gallery" />
       <div class="card-title">Gallery</div>
     </a>
-
-<!-- Nintendo Shop card (using mario3.jpg) -->
-<a class="card" href="https://www.nintendo.com/us/store/characters/mushroom-kingdom/"
+    <a class="card" href="/leaderboard/" title="View leaderboard">
+  <img src="/assets/hero/mario2.jpg" alt="Leaderboard" />
+  <div class="card-title">Leaderboard</div>
+</a>
+    <a class="card" href="https://www.nintendo.com/us/store/characters/mushroom-kingdom/"
    title="Nintendo Shop — Mushroom Kingdom"
    target="_blank" rel="noopener noreferrer">
   <img src="/assets/hero/mario3.jpg" alt="Nintendo Shop — Mushroom Kingdom" />

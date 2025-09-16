@@ -13,6 +13,10 @@ permissions:
   contents: write   # needed to create/push git tag
   packages: write
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   autotag:
     name: Create tag (if push to main)
@@ -73,7 +77,7 @@ jobs:
       IMAGE_TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-      DOCKERHUB_REPO_APP: ${{ secrets.DOCKERHUB_REPO_APP }}   # e.g. user/app
+      DOCKERHUB_REPO_APP: ${{ secrets.DOCKERHUB_REPO_APP }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -85,7 +89,6 @@ jobs:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
 
-      # Build locally (don’t push yet) so we can control retries
       - name: Build app (no push)
         uses: docker/build-push-action@v6
         with:
@@ -126,7 +129,7 @@ jobs:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
           NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
-          NEXUS_REPO_APP: ${{ secrets.NEXUS_REPO_APP }}  # e.g. myAPP
+          NEXUS_REPO_APP: ${{ secrets.NEXUS_REPO_APP }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
@@ -169,7 +172,7 @@ jobs:
       IMAGE_TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-      DOCKERHUB_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}   # e.g. user/web
+      DOCKERHUB_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -226,7 +229,7 @@ jobs:
           DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
           NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
-          NEXUS_REPO_WEB: ${{ secrets.NEXUS_REPO_WEB }}  # e.g. myweb
+          NEXUS_REPO_WEB: ${{ secrets.NEXUS_REPO_WEB }}
         with:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
