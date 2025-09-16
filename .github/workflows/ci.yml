@@ -207,7 +207,7 @@ jobs:
       - name: Run Playwright tests (emit Allure)
         run: |
           rm -rf allure-results
-          npx playwright test
+          ALLURE_RESULTS_DIR=allure-results npx playwright test
         env:
           BASE_URL: http://127.0.0.1:8081
 
@@ -254,56 +254,76 @@ jobs:
       severity: critical
       upload_artifacts: true
 
+  # Merge Allure results from all test jobs, build report, publish to Pages
   allure-report:
     name: Build Allure report (merged)
     runs-on: ubuntu-latest
-    needs: [unit-tests, db-tests, e2e]
+    needs: [ unit-tests, db-tests, e2e ]
     if: always()
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
-      # Pull all results into ./results/{unit,db,e2e}/allure-results
-      - uses: actions/download-artifact@v4
+      # Download ALL artifacts whose names start with allure-results-
+      # (unit: allure-results-unit, db: allure-results-db, e2e: allure-results-e2e)
+      - name: Download Allure artifacts
+        uses: actions/download-artifact@v4
         with:
-          name: allure-results-unit
-          path: results/unit
-      - uses: actions/download-artifact@v4
-        with:
-          name: allure-results-db
-          path: results/db
-      - uses: actions/download-artifact@v4
-        with:
-          name: allure-results-e2e
-          path: results/e2e
+          pattern: allure-results-*
+          merge-multiple: true        # put all artifacts into the same target dir
+          path: results               # results/** will contain the uploaded trees
 
-      - name: Sanity check merged inputs
+      # Collect every .../allure-results dir into one "merged" directory
+      - name: Collect Allure result dirs
+        shell: bash
         run: |
-          echo "Unit:" $(find results/unit/allure-results -type f 2>/dev/null | wc -l)
-          echo "DB:"   $(find results/db/allure-results   -type f 2>/dev/null | wc -l)
-          echo "E2E:"  $(find results/e2e/allure-results  -type f 2>/dev/null | wc -l)
+          set -euo pipefail
+          echo "Listing downloaded results tree:"
+          find results -maxdepth 4 -type d -print
 
-      # Generate HTML report
+          rm -rf merged
+          mkdir -p merged
+
+          mapfile -t dirs < <(find results -type d -name "allure-results")
+          echo "Found ${#dirs[@]} allure-results directories:"
+          printf ' - %s\n' "${dirs[@]:-}"
+
+          if [ "${#dirs[@]}" -eq 0 ]; then
+            echo "ERROR: No allure-results directories found. Did the test jobs create them?"
+            exit 1
+          fi
+
+          # Copy all result files into one place
+          for d in "${dirs[@]}"; do
+            cp -R "$d/." merged/
+          done
+
+          echo "Total result files copied:"
+          find merged -type f | wc -l
+
+      # Build the Allure HTML using the merged results
       - name: Generate Allure report
         uses: simple-elf/allure-report-action@v1.7
         with:
-          allure_results: results/unit/allure-results,results/db/allure-results,results/e2e/allure-results
+          allure_results: merged                 # <- single, guaranteed-nonempty dir
           allure_report: public/allure/${{ github.run_id }}
           keep_reports: 10
 
-      # Avoid permission hiccups from previous step
-      - name: Fix permissions on generated report
-        run: |
-          sudo chown -R $USER:$(id -gn) public || true
-
-      # Add a stable /index.html that redirects to the latest run
+      # Make the site root redirect to the latest report
       - name: Make root index redirect to latest Allure
+        shell: bash
         run: |
           set -e
+          sudo chown -R "$USER:$(id -gn)" public || true
           mkdir -p public/allure
           rm -rf public/allure/latest
-          cp -R "public/allure/${{ github.run_id }}" public/allure/latest 2>/dev/null || sudo cp -R "public/allure/${{ github.run_id }}" public/allure/latest
+          cp -R "public/allure/${{ github.run_id }}" public/allure/latest
           printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=allure/latest/index.html"><title>Allure Report</title><p><a href="allure/latest/index.html">Open the latest Allure report</a></p>' > public/index.html
 
+      # Upload the static site to the Pages artifact named "github-pages"
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
@@ -311,11 +331,15 @@ jobs:
 
   deploy-pages:
     if: always()
-    needs: [allure-report]
+    needs: [ allure-report ]
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
