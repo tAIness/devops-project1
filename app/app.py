@@ -77,7 +77,6 @@ def api_leaderboard():
     except psycopg2.Error as exc:
         return jsonify({"error": "db_error", "detail": str(exc)}), 500
 
-
 if __name__ == "__main__":
     port = int(os.getenv("PORT", "8000"))
     app.run(host="0.0.0.0", port=port)
