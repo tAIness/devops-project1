@@ -306,54 +306,54 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Download all result sets produced by the three jobs
       - uses: actions/download-artifact@v4
         with:
           name: allure-results-unit
           path: results/unit
-
       - uses: actions/download-artifact@v4
         with:
           name: allure-results-db
           path: results/db
-
       - uses: actions/download-artifact@v4
         with:
           name: allure-results-e2e
           path: results/e2e
 
-      - name: Debug count merged allure files
+      # Merge all allure-results into one folder that the CLI can read
+      - name: Merge Allure result dirs
         run: |
-          echo "Unit:" $(find results/unit/allure-results -type f 2>/dev/null | wc -l)
-          echo "DB:"   $(find results/db/allure-results   -type f 2>/dev/null | wc -l)
-          echo "E2E:"  $(find results/e2e/allure-results  -type f 2>/dev/null | wc -l)
-          total=$(find results -path "*/allure-results/*" -type f 2>/dev/null | wc -l)
-          if [ "$total" -eq 0 ]; then
-            echo "No Allure files found – check test jobs."; exit 1
+          set -euo pipefail
+          mkdir -p merged/allure-results
+          shopt -s nullglob
+          for d in results/*/allure-results; do
+            echo "Merging $d"
+            cp -R "$d"/. merged/allure-results/ || true
+          done
+          echo "TOTAL FILES:" $(find merged/allure-results -type f | wc -l)
+          # Fail early if nothing was merged so you can see which producer job is empty
+          if [ "$(find merged/allure-results -type f | wc -l)" -eq 0 ]; then
+            echo "No Allure files found – check unit/db/e2e jobs produced results."; exit 1
           fi
 
+      # Generate the HTML report (action bundles Allure CLI)
       - name: Generate Allure report
         uses: simple-elf/allure-report-action@v1.7
         with:
-          allure_results: results/unit/allure-results,results/db/allure-results,results/e2e/allure-results
+          allure_results: merged/allure-results
           allure_report: public/allure/${{ github.run_id }}
           keep_reports: 10
 
-      - name: Fix permissions on generated report
-        run: sudo chown -R $USER:$(id -gn) public || true
-
-      - name: Make root index redirect to latest Allure
+      # Make root redirect to the latest report
+      - name: Prepare index.html and latest symlink
         run: |
           set -e
           mkdir -p public/allure
           rm -rf public/allure/latest
-          cp -r "public/allure/${{ github.run_id }}" public/allure/latest
-          cat > public/index.html <<'HTML'
-          <!doctype html><meta charset="utf-8">
-          <meta http-equiv="refresh" content="0; url=allure/latest/index.html">
-          <title>Allure Report</title>
-          <p><a href="allure/latest/index.html">Go to the latest Allure report</a></p>
-          HTML
+          cp -R "public/allure/${{ github.run_id }}" public/allure/latest
+          printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=allure/latest/index.html"><title>Allure Report</title><p><a href="allure/latest/index.html">Open the latest Allure report</a></p>' > public/index.html
 
+      # Ship to GitHub Pages
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
