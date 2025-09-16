@@ -306,7 +306,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Download all result sets produced by the three jobs
       - uses: actions/download-artifact@v4
         with:
           name: allure-results-unit
@@ -320,7 +319,6 @@ jobs:
           name: allure-results-e2e
           path: results/e2e
 
-      # Merge all allure-results into one folder that the CLI can read
       - name: Merge Allure result dirs
         run: |
           set -euo pipefail
@@ -336,7 +334,6 @@ jobs:
             echo "No Allure files found – check unit/db/e2e jobs produced results."; exit 1
           fi
 
-      # Generate the HTML report (action bundles Allure CLI)
       - name: Generate Allure report
         uses: simple-elf/allure-report-action@v1.7
         with:
@@ -344,7 +341,24 @@ jobs:
           allure_report: public/allure/${{ github.run_id }}
           keep_reports: 10
 
-      # Make root redirect to the latest report
+      - name: Fix permissions on generated report
+        run: |
+            # Allure action runs in a container and writes files as root.
+            sudo chown -R "$USER:$(id -gn)" public || true
+
+      - name: Make root index redirect to latest Allure
+        run: |
+          set -e
+          mkdir -p public/allure
+          rm -rf public/allure/latest
+          cp -R "public/allure/${{ github.run_id }}" public/allure/latest
+          cat > public/index.html <<'HTML'
+          <!doctype html><meta charset="utf-8">
+          <meta http-equiv="refresh" content="0; url=allure/latest/index.html">
+          <title>Allure Report</title>
+          <p><a href="allure/latest/index.html">Open the latest Allure report</a></p>
+          HTML
+
       - name: Prepare index.html and latest symlink
         run: |
           set -e
@@ -353,7 +367,6 @@ jobs:
           cp -R "public/allure/${{ github.run_id }}" public/allure/latest
           printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=allure/latest/index.html"><title>Allure Report</title><p><a href="allure/latest/index.html">Open the latest Allure report</a></p>' > public/index.html
 
-      # Ship to GitHub Pages
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
