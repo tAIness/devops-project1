@@ -249,11 +249,11 @@ jobs:
     name: Build Allure report (merged)
     runs-on: ubuntu-latest
     needs: [unit-tests, db-tests, e2e]
-    if: always()   # still builds even if tests failed, so you can see the report
+    if: always()
     steps:
       - uses: actions/checkout@v4
 
-      # Download all three result sets into a single tree
+      # Download all three result sets
       - uses: actions/download-artifact@v4
         with:
           name: allure-results-unit
@@ -267,14 +267,25 @@ jobs:
           name: allure-results-e2e
           path: results/e2e
 
-      # Build the Allure report (bundled CLI via the action)
+      # Merge results into a single folder the action can consume
+      - name: Merge Allure result folders
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p merged-results
+          shopt -s nullglob
+          for d in results/*/allure-results; do
+            echo "Merging $d"
+            cp -R "$d"/. merged-results/
+          done
+          echo "Total files:"; ls -l merged-results | wc -l
+
+      # Generate the report (correct inputs for this action)
       - name: Generate Allure report
         uses: simple-elf/allure-report-action@v1.7
         with:
-          results_glob: "results/**/allure-results"
-          report_folder: "allure-report"
-          report_id: "${{ github.run_id }}"
-          suite_name: "SuperMario CI"
+          allure_results: merged-results
+          allure_report: allure-report
 
       # Upload the HTML report as a downloadable artifact
       - name: Upload merged Allure HTML
@@ -283,3 +294,40 @@ jobs:
           name: allure-report
           path: allure-report
           if-no-files-found: error
+
+  # 👉 Add this job AFTER `allure-report` to publish to GitHub Pages
+  publish-allure:
+    name: Publish Allure to GitHub Pages
+    runs-on: ubuntu-latest
+    needs: [allure-report]
+    if: always()
+    permissions:
+      contents: write   # required to push to gh-pages
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pull the HTML we just built
+      - uses: actions/download-artifact@v4
+        with:
+          name: allure-report
+          path: ./allure-report
+
+      # Deploy to gh-pages under allure/<run_id>/
+      - name: Deploy Allure report to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./allure-report
+          destination_dir: allure/${{ github.run_id }}
+          keep_files: true
+
+      - name: Add link to job summary
+        run: |
+          URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/deployments/activity_log?environment=github-pages"
+          DIRECT="https://${GITHUB_REPOSITORY_OWNER}.github.io/${GITHUB_REPOSITORY#*/}/allure/${GITHUB_RUN_ID}/index.html"
+          {
+            echo "## ✅ Allure Report"
+            echo ""
+            echo "- **Direct link:** ${DIRECT}"
+            echo "- **Pages activity:** ${URL}"
+          } >> "$GITHUB_STEP_SUMMARY"
