@@ -30,7 +30,6 @@ jobs:
           python -m pip install -U pip
           pip install -r app/requirements.txt
           pip install "pylint==3.2.*"
-
       - name: Run pylint (in app/)
         working-directory: app
         run: python -m pylint --disable=C0114,C0116,W0718,W0212 *.py
@@ -51,13 +50,26 @@ jobs:
         run: |
           python -m pip install -U pip
           pip install -r app/requirements.txt
+          # allure for pytest
+          pip install allure-pytest
           if [ -f app/tests/requirements.txt ]; then pip install -r app/tests/requirements.txt; fi
-      - name: Run unit tests (exclude DB)
+      - name: Run unit tests (exclude DB) + Allure
         working-directory: app
-        run: python -m pytest -q -m "not db" --junitxml=pytest-results.xml
+        run: |
+          mkdir -p allure-results
+          python -m pytest -q -m "not db" --junitxml=pytest-results.xml --alluredir=allure-results
+      - name: Upload unit JUnit & Allure
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results-unit
+          path: |
+            app/allure-results
+            app/pytest-results.xml
 
   db-tests:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     services:
       postgres:
         image: postgres:15
@@ -72,14 +84,12 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
-
     env:
       DB_NAME: supermario
       DB_USER: mario
       DB_PASSWORD: secret
       DB_HOST: 127.0.0.1
       DB_PORT: 5432
-
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -87,16 +97,20 @@ jobs:
           python-version: "3.12"
       - name: Install dependencies
         run: |
-          pip install -r app/requirements.txt pytest psycopg2-binary
-      - name: Run DB tests only
+          pip install -r app/requirements.txt pytest psycopg2-binary allure-pytest
+      - name: Run DB tests only + Allure
         working-directory: app
-        run: python -m pytest -v -m db tests/test_db.py --junitxml=pytest-results.xml
-      - name: Upload DB test report
+        run: |
+          mkdir -p allure-results
+          python -m pytest -v -m db tests/test_db.py --junitxml=pytest-results.xml --alluredir=allure-results
+      - name: Upload DB JUnit & Allure
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: db-test-results
-          path: app/pytest-results.xml
+          name: allure-results-db
+          path: |
+            app/allure-results
+            app/pytest-results.xml
 
   e2e:
     runs-on: ubuntu-latest
@@ -176,16 +190,23 @@ jobs:
           done
           echo "Web didn't become ready"; docker logs web; exit 1
 
-      # --- Playwright without the deprecated action ---
+      # --- Playwright (Allure reporter configured in playwright.config.ts) ---
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
       - run: npm ci
       - run: npx playwright install --with-deps
-      - run: npx playwright test
+      - name: Run Playwright tests
+        run: npx playwright test
         env:
           BASE_URL: http://127.0.0.1:8081
+      - name: Upload e2e Allure results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-results-e2e
+          path: allure-results
 
   build:
     runs-on: ubuntu-latest
@@ -222,3 +243,43 @@ jobs:
       ignore_list_path: security/ignores.txt
       severity: critical
       upload_artifacts: true
+
+  # Merge Allure results from all jobs and publish a single HTML report artifact
+  allure-report:
+    name: Build Allure report (merged)
+    runs-on: ubuntu-latest
+    needs: [unit-tests, db-tests, e2e]
+    if: always()   # still builds even if tests failed, so you can see the report
+    steps:
+      - uses: actions/checkout@v4
+
+      # Download all three result sets into a single tree
+      - uses: actions/download-artifact@v4
+        with:
+          name: allure-results-unit
+          path: results/unit
+      - uses: actions/download-artifact@v4
+        with:
+          name: allure-results-db
+          path: results/db
+      - uses: actions/download-artifact@v4
+        with:
+          name: allure-results-e2e
+          path: results/e2e
+
+      # Build the Allure report (bundled CLI via the action)
+      - name: Generate Allure report
+        uses: simple-elf/allure-report-action@v1.7
+        with:
+          results_glob: "results/**/allure-results"
+          report_folder: "allure-report"
+          report_id: "${{ github.run_id }}"
+          suite_name: "SuperMario CI"
+
+      # Upload the HTML report as a downloadable artifact
+      - name: Upload merged Allure HTML
+        uses: actions/upload-artifact@v4
+        with:
+          name: allure-report
+          path: allure-report
+          if-no-files-found: error
