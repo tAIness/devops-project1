@@ -10,14 +10,8 @@
   }
   const c = canvas.getContext('2d');
 
-  // Ensure we have a name (also prompted by index.html, but keep a fallback)
-  (function ensureName() {
-    let name = localStorage.getItem('playerName');
-    if (!name) {
-      name = prompt('Enter your player name:');
-      if (name) localStorage.setItem('playerName', name);
-    }
-  })();
+  // Keep the player name only for the current run
+  let playerName = null;
 
   // --- Palette / Constants ---------------------------------------------------
   const PAL = {
@@ -70,6 +64,10 @@
   // --- Controls --------------------------------------------------------------
   function start() {
     if (!running) {
+      // Ask for name every time
+      const name = prompt('Enter your player name:');
+      playerName = (name && name.trim()) ? name.trim() : 'anonymous';
+
       startTime = performance.now();
       running = true;
       requestAnimationFrame(loop);
@@ -109,7 +107,7 @@
 
   // --- Net: Post score to backend -------------------------------------------
   async function postScore(milliseconds) {
-    const user_name = localStorage.getItem('playerName') || 'anonymous';
+    const user_name = playerName || 'anonymous';
     const result = Math.max(0, Math.floor(milliseconds));
     try {
       await fetch('/api/score', {
@@ -121,7 +119,6 @@
       console.error('Failed to record score', e);
     }
   }
-  // Expose for debugging/manual calls
   window.postScore = postScore;
 
   // --- Drawing ---------------------------------------------------------------
