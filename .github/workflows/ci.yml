@@ -128,7 +128,7 @@ jobs:
           docker network rm e2e 2>/dev/null || true
           docker network create e2e
 
-      - name: Start Postgres (same network)
+      - name: Start Postgres
         run: |
           docker run -d --name db \
             --network e2e \
@@ -141,15 +141,13 @@ jobs:
       - name: Wait for Postgres
         run: |
           for i in {1..30}; do
-            if docker exec db pg_isready -h localhost -p 5432 -U mario -d supermario; then
-              exit 0
-            fi
+            if docker exec db pg_isready -h localhost -p 5432 -U mario -d supermario; then exit 0; fi
             echo "waiting for postgres…"
             sleep 2
           done
           echo "Postgres didn't get ready"; docker logs db; exit 1
 
-      - name: Start app (same network)
+      - name: Start app
         run: |
           docker run -d --name app \
             --network e2e \
@@ -166,7 +164,7 @@ jobs:
           done
           echo "App didn't become healthy"; docker logs app; exit 1
 
-      - name: Start web (same network; nginx resolves app:8000)
+      - name: Start web
         run: |
           docker run -d --name web \
             --network e2e \
@@ -181,13 +179,13 @@ jobs:
           done
           echo "Web didn't become ready"; docker logs web; exit 1
 
-      # Playwright
+      # --- Playwright without the deprecated action ---
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
       - run: npm ci
-      - uses: microsoft/playwright-github-action@v1
+      - run: npx playwright install --with-deps
       - run: npx playwright test
         env:
           BASE_URL: http://127.0.0.1:8081
