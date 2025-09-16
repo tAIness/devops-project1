@@ -14,13 +14,11 @@ services:
       retries: 10
 
   app:
-    build:
-      context: ../app
     image: ${IMAGE_REPO_APP}:${TAG}
     environment:
-      # inside the docker network postgres listens on 5432, not ${DB_PORT}
+      # IMPORTANT: inside compose network Postgres is always on 5432
       DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
-      PORT: "${FLASK_PORT}"
+      PORT: "${FLASK_PORT:-8000}"     # <- use FLASK_PORT, default 8000 if missing
     depends_on:
       db:
         condition: service_healthy
@@ -28,11 +26,9 @@ services:
       - "8000"
 
   web:
-    build:
-      context: ../web
-      dockerfile: Dockerfile
     image: ${IMAGE_REPO_WEB}:${TAG}
-    ports: ["8080:80"]
+    ports:
+      - "80:80"
     depends_on:
       app:
         condition: service_healthy
