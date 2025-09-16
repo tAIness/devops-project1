@@ -1,5 +1,7 @@
 import { defineConfig } from '@playwright/test';
 
+let process;
+// @ts-ignore
 export default defineConfig({
   reporter: [
     ['list'],                                     // console
@@ -10,6 +12,6 @@ export default defineConfig({
    }]
   ],
   use: {
-    baseURL: process.env.BASE_URL || 'http://127.0.0.1:8080',
+    baseURL: process.env.BASE_URL || 'http://127.0.0.1:8081',
   }
 });

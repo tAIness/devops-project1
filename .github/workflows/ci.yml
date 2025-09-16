@@ -238,8 +238,8 @@ jobs:
 
       - name: Run Playwright tests (emit Allure)
         run: |
-          mkdir -p allure-results
-          ALLURE_RESULTS_DIR=allure-results npx playwright test --reporter=line,allure-playwright
+          rm -rf allure-results
+          npx playwright test
         env:
           BASE_URL: http://127.0.0.1:8081
 
