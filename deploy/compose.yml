@@ -32,7 +32,7 @@ services:
       context: ../web
       dockerfile: Dockerfile
     image: ${IMAGE_REPO_WEB}:${TAG}
-    ports: ["8081:80"]
+    ports: ["8080:80"]
     depends_on:
       app:
         condition: service_healthy
