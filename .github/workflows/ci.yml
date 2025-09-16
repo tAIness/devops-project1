@@ -6,7 +6,7 @@ name: CI (PR checks)
 on:
   pull_request:
     branches:
-      - main
+      - feature/new-apps
 
 permissions:
   contents: read
