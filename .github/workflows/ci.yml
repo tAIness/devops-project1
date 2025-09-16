@@ -8,8 +8,8 @@ on:
 
 permissions:
   contents: read
-  pages: write        # <-- needed for deploy-pages
-  id-token: write     # <-- needed for deploy-pages OIDC
+  pages: write          # needed for deploy-pages
+  id-token: write       # needed for deploy-pages OIDC
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -190,7 +190,7 @@ jobs:
           done
           echo "Web didn't become ready"; docker logs web; exit 1
 
-      # --- Playwright (Allure reporter configured in playwright.config.ts) ---
+      # Playwright (Allure reporter should be configured in playwright.config.ts)
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -244,7 +244,7 @@ jobs:
       severity: critical
       upload_artifacts: true
 
-  # Merge Allure results from all jobs and publish an HTML report to GitHub Pages
+  # Merge Allure results + publish to GitHub Pages with a root redirect to latest
   allure-report:
     name: Build Allure report (merged)
     runs-on: ubuntu-latest
@@ -253,7 +253,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Download all three result sets
+      # Download all result sets
       - uses: actions/download-artifact@v4
         with:
           name: allure-results-unit
@@ -267,14 +267,27 @@ jobs:
           name: allure-results-e2e
           path: results/e2e
 
-      # Generate report (CLI bundled in the action)
+      # Generate report (action bundles the Allure CLI)
       - name: Generate Allure report
         uses: simple-elf/allure-report-action@v1.7
         with:
           allure_results: "results/unit/allure-results,results/db/allure-results,results/e2e/allure-results"
           allure_report: "public/allure/${{ github.run_id }}"
-          # (Optional) keep history of last N reports under public/allure/history
           keep_reports: 10
+
+      # Make root redirect to the latest report
+      - name: Make root index redirect to latest Allure
+        run: |
+          set -e
+          mkdir -p public/allure
+          rm -rf public/allure/latest
+          cp -r "public/allure/${{ github.run_id }}" public/allure/latest
+          cat > public/index.html <<'HTML'
+          <!doctype html><meta charset="utf-8">
+          <meta http-equiv="refresh" content="0; url=allure/latest/index.html">
+          <title>Allure Report</title>
+          <p><a href="allure/latest/index.html">Go to the latest Allure report</a></p>
+          HTML
 
       # Upload the static site artifact named "github-pages"
       - name: Upload Pages artifact
@@ -282,7 +295,6 @@ jobs:
         with:
           path: public
 
-  # Publish to GitHub Pages (needs the artifact from 'allure-report')
   deploy-pages:
     if: always()
     needs: [allure-report]
