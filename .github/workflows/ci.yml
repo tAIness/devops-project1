@@ -298,14 +298,12 @@ jobs:
   allure-report:
     name: Build Allure report (merged)
     runs-on: ubuntu-latest
-    needs:
-      - unit-tests
-      - db-tests
-      - e2e
+    needs: [ unit-tests, db-tests, e2e ]
     if: always()
     steps:
       - uses: actions/checkout@v4
 
+      # Pull results from the three test jobs
       - uses: actions/download-artifact@v4
         with:
           name: allure-results-unit
@@ -319,47 +317,26 @@ jobs:
           name: allure-results-e2e
           path: results/e2e
 
-      - name: Merge Allure result dirs
+      # Sanity check: did we actually get any Allure files?
+      - name: Debug count merged allure files
         run: |
-          set -euo pipefail
-          mkdir -p merged/allure-results
-          shopt -s nullglob
-          for d in results/*/allure-results; do
-            echo "Merging $d"
-            cp -R "$d"/. merged/allure-results/ || true
-          done
-          echo "TOTAL FILES:" $(find merged/allure-results -type f | wc -l)
-          # Fail early if nothing was merged so you can see which producer job is empty
-          if [ "$(find merged/allure-results -type f | wc -l)" -eq 0 ]; then
-            echo "No Allure files found – check unit/db/e2e jobs produced results."; exit 1
-          fi
+          echo "Unit:" $(find results/unit/allure-results -type f 2>/dev/null | wc -l)
+          echo "DB:"   $(find results/db/allure-results   -type f 2>/dev/null | wc -l)
+          echo "E2E:"  $(find results/e2e/allure-results  -type f 2>/dev/null | wc -l)
 
+      # >>> This is the step you were missing <<<
       - name: Generate Allure report
         uses: simple-elf/allure-report-action@v1.7
         with:
-          allure_results: merged/allure-results
+          # comma-separated list of folders that contain allure JSON
+          allure_results: results/unit/allure-results,results/db/allure-results,results/e2e/allure-results
+          # where to render the HTML report
           allure_report: public/allure/${{ github.run_id }}
+          # keep some history to enable trends
           keep_reports: 10
 
-      - name: Fix permissions on generated report
-        run: |
-            # Allure action runs in a container and writes files as root.
-            sudo chown -R "$USER:$(id -gn)" public || true
-
+      # Make "latest" symlink folder + root redirect
       - name: Make root index redirect to latest Allure
-        run: |
-          set -e
-          mkdir -p public/allure
-          rm -rf public/allure/latest
-          cp -R "public/allure/${{ github.run_id }}" public/allure/latest
-          cat > public/index.html <<'HTML'
-          <!doctype html><meta charset="utf-8">
-          <meta http-equiv="refresh" content="0; url=allure/latest/index.html">
-          <title>Allure Report</title>
-          <p><a href="allure/latest/index.html">Open the latest Allure report</a></p>
-          HTML
-
-      - name: Prepare index.html and latest symlink
         run: |
           set -e
           mkdir -p public/allure
@@ -367,15 +344,15 @@ jobs:
           cp -R "public/allure/${{ github.run_id }}" public/allure/latest
           printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=allure/latest/index.html"><title>Allure Report</title><p><a href="allure/latest/index.html">Open the latest Allure report</a></p>' > public/index.html
 
+      # Upload static site artifact for Pages
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: public
 
   deploy-pages:
+    needs: [ allure-report ]
     if: always()
-    needs:
-      - allure-report
     runs-on: ubuntu-latest
     environment:
       name: github-pages
