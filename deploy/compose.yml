@@ -5,11 +5,9 @@ services:
       POSTGRES_DB: ${DB_NAME}
       POSTGRES_USER: ${DB_USER}
       POSTGRES_PASSWORD: ${DB_PASSWORD}
-    ports: ["${DB_PORT}:5432"]
     volumes:
       - supermario_db_data:/var/lib/postgresql/data
     healthcheck:
-      # use the env that actually exists inside the postgres container
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
@@ -26,7 +24,8 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    ports: ["8000:8000"]
+    expose:
+      - "8000"
 
   web:
     build:
@@ -38,7 +37,7 @@ services:
       app:
         condition: service_healthy
     volumes:
-      - ../content/images:/usr/share/nginx/html/images:ro  # <-- was ./content/images
+      - ../content/images:/usr/share/nginx/html/images:ro
 
 volumes:
   supermario_db_data:
