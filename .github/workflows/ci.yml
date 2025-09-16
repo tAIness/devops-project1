@@ -275,6 +275,11 @@ jobs:
           allure_report: "public/allure/${{ github.run_id }}"
           keep_reports: 10
 
+      # Take ownership of files produced by the containerized action
+      - name: Fix permissions on generated report
+        run: |
+          sudo chown -R $USER:$(id -gn) public
+
       # Make root redirect to the latest report
       - name: Make root index redirect to latest Allure
         run: |
