@@ -50,3 +50,4 @@ def test_table_exists():
     exists = cur.fetchone()[0]
     assert exists == "scores", "scores table should exist"
     conn.close()
+
