@@ -6,9 +6,6 @@ on:
   pull_request:
     branches:
       - main
-  push:
-    branches:
-      - feature/new-apps
 
 permissions:
   contents: read
