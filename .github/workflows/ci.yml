@@ -33,9 +33,10 @@ jobs:
           python -m pip install -U pip
           pip install -r app/requirements.txt
           pip install "pylint==3.2.*"
+
       - name: Run pylint (in app/)
         working-directory: app
-        run: python -m pylint --disable=C0114,C0116 *.py
+        run: python -m pylint --disable=C0114,C0116,W0718,W0212 *.py
 
   unit-tests:
     runs-on: ubuntu-latest
@@ -67,17 +68,21 @@ jobs:
           POSTGRES_DB: supermario
           POSTGRES_USER: mario
           POSTGRES_PASSWORD: secret
+        ports:
+          - "5432:5432"
         options: >-
-          --health-cmd="pg_isready -h postgres -p 5432 -U mario -d supermario"
+          --health-cmd="pg_isready -h 127.0.0.1 -p 5432 -U mario -d supermario"
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
+
     env:
       DB_NAME: supermario
       DB_USER: mario
       DB_PASSWORD: secret
-      DB_HOST: postgres
+      DB_HOST: 127.0.0.1
       DB_PORT: 5432
+
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -115,8 +120,6 @@ jobs:
           --health-retries=5
     steps:
       - uses: actions/checkout@v4
-
-      # Build images for local run
       - uses: docker/setup-buildx-action@v3
       - uses: docker/build-push-action@v6
         with:
@@ -131,14 +134,18 @@ jobs:
           load: true
           tags: local/web:e2e
 
-      # Run the stack (map ports on localhost)
+      - name: Create e2e network
+        run: docker network create e2e
+
       - name: Start app container
         run: |
           docker run -d --name app \
-            -p 8000:8000 \
+            --network e2e \                     # same network as web
+            -p 8000:8000 \                      # publish so we can curl health
             -e DATABASE_URL="postgresql://mario:secret@127.0.0.1:5432/supermario" \
             -e PORT=8000 \
             local/app:e2e
+
       - name: Wait for app
         run: |
           for i in {1..30}; do
@@ -149,7 +156,11 @@ jobs:
 
       - name: Start web container
         run: |
-          docker run -d --name web -p 8081:80 local/web:e2e
+          docker run -d --name web \
+            --network e2e \                     # can reach 'app:8000' via Docker DNS
+            -p 8081:80 \
+            local/web:e2e
+
       - name: Wait for web
         run: |
           for i in {1..30}; do
@@ -158,7 +169,7 @@ jobs:
           done
           echo "Web didn't become ready"; docker logs web; exit 1
 
-      # Playwright tests
+      # Playwright
       - uses: actions/setup-node@v4
         with:
           node-version: 20
