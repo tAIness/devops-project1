@@ -1,0 +1,4 @@
+"Status","Start Time","Stop Time","Duration in ms","Parent Suite","Suite","Sub Suite","Test Class","Test Method","Name","Description"
+"passed","Tue Sep 16 11:25:54 GMT 2025","Tue Sep 16 11:25:54 GMT 2025","4","tests","test_db","","","","test_table_exists",""
+"passed","Tue Sep 16 11:25:32 GMT 2025","Tue Sep 16 11:25:32 GMT 2025","0","tests","test_smoke","","","","test_health_smoke",""
+"passed","Tue Sep 16 11:25:54 GMT 2025","Tue Sep 16 11:25:54 GMT 2025","5","tests","test_db","","","","test_connection",""
