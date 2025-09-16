@@ -1,70 +1,72 @@
 <!doctype html>
-<html>
+<html lang="en">
   <head>
     <meta charset="utf-8" />
-    <title>SuperMario Scores</title>
-    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Super Mario — Play</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- Optional: reuse your site styles if you like -->
+    <link rel="preload" href="/css/site.css" as="style" />
+    <link rel="stylesheet" href="/css/site.css" />
     <style>
-      body { font-family: system-ui, Arial, sans-serif; margin: 2rem; }
-      form, .board { max-width: 520px; }
-      input, button { padding: .6rem; font-size: 1rem; }
-      .row { display: flex; gap: .5rem; margin: .5rem 0; }
-      table { border-collapse: collapse; margin-top: 1rem; width: 520px; }
-      th, td { border-bottom: 1px solid #ddd; padding: .5rem; text-align: left; }
-      th { background: #f8f8f8; }
+      /* Minimal layout for the game page */
+      .wrap {
+        max-width: 1000px;
+        margin: 2rem auto;
+        padding: 0 1rem;
+        text-align: center;
+      }
+      .controls {
+        display: inline-flex;
+        gap: .75rem;
+        margin: 1rem 0 1.25rem;
+      }
+      .controls button {
+        padding: .6rem 1rem;
+        font-size: 1rem;
+        border: 0;
+        border-radius: .6rem;
+        cursor: pointer;
+      }
+      #game {
+        display: block;
+        margin: 0 auto;
+        border-radius: 12px;
+        box-shadow: 0 8px 24px rgba(0,0,0,.15);
+        background: #9ed8ff; /* matches game sky color as a fallback */
+      }
+      .hud-line { margin-top: .5rem; opacity: .75; }
     </style>
   </head>
   <body>
-    <h1>SuperMario – Submit Score</h1>
-    <form id="scoreForm">
-      <div class="row">
-        <input id="name" placeholder="Gamer name" required />
-        <input id="result" type="number" placeholder="Result" required />
-        <button type="submit">Save</button>
-      </div>
-      <div id="msg"></div>
-    </form>
+    <div class="wrap">
+      <h1>Super Mario — Play</h1>
 
-    <div class="board">
-      <h2>Leaderboard (Top 20)</h2>
-      <table id="lb">
-        <thead><tr><th>#</th><th>Gamer</th><th>Best</th></tr></thead>
-        <tbody></tbody>
-      </table>
+      <div class="controls">
+        <button id="startBtn" type="button">Start</button>
+        <button id="resetBtn" type="button">Reset</button>
+      </div>
+
+      <canvas id="game" width="960" height="480" aria-label="Super Mario style game"></canvas>
+      <p class="hud-line">Player: <strong id="playerName">anonymous</strong></p>
+
+      <noscript>
+        <p>You need JavaScript enabled to play.</p>
+      </noscript>
     </div>
 
+    <!-- Ensure we have a stored player name (game.js also has a fallback) -->
     <script>
-      async function loadLeaderboard() {
-        const res = await fetch('/api/leaderboard');
-        const data = await res.json();
-        const tb = document.querySelector('#lb tbody');
-        tb.innerHTML = '';
-        data.forEach((r, i) => {
-          const tr = document.createElement('tr');
-          tr.innerHTML = `<td>${i+1}</td><td>${r.user_name}</td><td>${r.best}</td>`;
-          tb.appendChild(tr);
-        });
-      }
-      document.getElementById('scoreForm').addEventListener('submit', async (e) => {
-        e.preventDefault();
-        const user_name = document.getElementById('name').value.trim();
-        const result = parseInt(document.getElementById('result').value, 10);
-        const msg = document.getElementById('msg');
-        msg.textContent = 'Saving...';
-        const res = await fetch('/api/score', {
-          method: 'POST',
-          headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify({ user_name, result })
-        });
-        if (res.ok) {
-          msg.textContent = 'Saved!';
-          await loadLeaderboard();
-        } else {
-          const j = await res.json().catch(() => ({}));
-          msg.textContent = 'Error: ' + (j.error || res.statusText);
+      (function () {
+        let name = localStorage.getItem('playerName');
+        if (!name) {
+          name = prompt('Enter your player name:');
+          if (name) localStorage.setItem('playerName', name);
         }
-      });
-      loadLeaderboard();
+        document.getElementById('playerName').textContent = name || 'anonymous';
+      })();
     </script>
+
+    <!-- The game logic. Posts to /api/score on game over. -->
+    <script src="/game/game.js"></script>
   </body>
 </html>

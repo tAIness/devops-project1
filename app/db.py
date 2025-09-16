@@ -7,35 +7,38 @@ from typing import Iterator
 
 import psycopg2
 from psycopg2.pool import SimpleConnectionPool
-from psycopg2.extras import RealDictCursor
 
-# ---- connection settings from env ----
-DB_NAME = os.getenv("DB_NAME", "supermario")
-DB_USER = os.getenv("DB_USER", "mario")
-DB_PASSWORD = os.getenv("DB_PASSWORD", "secret")
-DB_HOST = os.getenv("DB_HOST", "localhost")
-DB_PORT = int(os.getenv("DB_PORT", "5432"))
+# Single source of truth for DB connection in containers:
+# service name 'db', default creds match docker-compose defaults.
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    "postgresql://supermario:supermario@db:5432/supermario",
+)
+
+_MIN_CONN = int(os.getenv("DB_POOL_MIN", "1"))
+_MAX_CONN = int(os.getenv("DB_POOL_MAX", "10"))
 
 
 def _get_pool() -> SimpleConnectionPool:
-    """Lazy-create and reuse a single connection pool (no globals/classes)."""
-    pool = getattr(_get_pool, "pool", None)
+    """Create (once) and return a global connection pool."""
+    pool = getattr(_get_pool, "_pool", None)
     if pool is None:
-        _get_pool.pool = SimpleConnectionPool(
-            minconn=1,
-            maxconn=5,
-            dbname=DB_NAME,
-            user=DB_USER,
-            password=DB_PASSWORD,
-            host=DB_HOST,
-            port=DB_PORT,
+        _get_pool._pool = SimpleConnectionPool(
+            minconn=_MIN_CONN,
+            maxconn=_MAX_CONN,
+            dsn=DATABASE_URL,
         )
-        pool = _get_pool.pool
+        pool = _get_pool._pool
     return pool
 
 
 @contextmanager
 def get_conn() -> Iterator[psycopg2.extensions.connection]:
+    """
+    Borrow a connection from the pool.
+    Usage:
+        with get_conn() as conn, conn.cursor() as cur: ...
+    """
     pool = _get_pool()
     conn = pool.getconn()
     try:
@@ -45,42 +48,16 @@ def get_conn() -> Iterator[psycopg2.extensions.connection]:
 
 
 def init_db() -> None:
-    """Create the scores table if it doesn't exist."""
+    """Idempotent table creation."""
     with get_conn() as conn, conn.cursor() as cur:
         cur.execute(
             """
             CREATE TABLE IF NOT EXISTS scores (
-              id SERIAL PRIMARY KEY,
-              user_name TEXT NOT NULL,
-              result INTEGER NOT NULL,
-              created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
-            );
+                id SERIAL PRIMARY KEY,
+                user_name TEXT NOT NULL,
+                result INTEGER NOT NULL,
+                created_at TIMESTAMPTZ DEFAULT NOW()
+            )
             """
         )
         conn.commit()
-
-
-def insert_score(user_name: str, result: int) -> None:
-    """Insert one score row."""
-    with get_conn() as conn, conn.cursor() as cur:
-        cur.execute(
-            "INSERT INTO scores (user_name, result) VALUES (%s, %s);",
-            (user_name, result),
-        )
-        conn.commit()
-
-
-def get_scores(limit: int = 10) -> list[dict]:
-    """Return latest scores as a list of dicts."""
-    with get_conn() as conn, conn.cursor(cursor_factory=RealDictCursor) as cur:
-        cur.execute(
-            """
-            SELECT id, user_name, result, created_at
-            FROM scores
-            ORDER BY id DESC
-            LIMIT %s;
-            """,
-            (limit,),
-        )
-        rows = cur.fetchall()
-        return [dict(r) for r in rows]

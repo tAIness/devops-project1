@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Super Mario — Leaderboard</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="stylesheet" href="/css/site.css" />
+  <style>
+    main { max-width: 860px; margin: 2rem auto; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    th, td { padding: .6rem .8rem; border-bottom: 1px solid #2a2a2a; text-align: left; }
+    th { background: #151515; }
+    .row { display:flex; gap:.5rem; align-items:center; }
+    .muted { opacity:.7; font-size:.9rem; }
+    .topbar { display:flex; justify-content:space-between; align-items:center; }
+    a.btn { padding:.5rem .8rem; border-radius:.6rem; background:#222; text-decoration:none; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="topbar">
+      <h1>Leaderboard</h1>
+      <div class="row">
+        <a class="btn" href="/">← Back</a>
+        <a class="btn" href="/api/leaderboard" target="_blank" rel="noopener">API (JSON)</a>
+      </div>
+    </div>
+    <p class="muted">Top players by best time (lower is better).</p>
+
+    <table id="lb">
+      <thead><tr><th>#</th><th>Gamer</th><th>Best (ms)</th></tr></thead>
+      <tbody></tbody>
+    </table>
+  </main>
+
+  <script>
+    async function loadLeaderboard(){
+      try {
+        const res = await fetch('/api/leaderboard');
+        const data = await res.json();
+        const tb = document.querySelector('#lb tbody');
+        tb.innerHTML = '';
+        data.forEach((r, i) => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${i+1}</td><td>${r.user_name}</td><td>${r.best}</td>`;
+          tb.appendChild(tr);
+        });
+      } catch (e) {
+        document.querySelector('#lb tbody').innerHTML =
+          `<tr><td colspan="3">Failed to load: ${e}</td></tr>`;
+      }
+    }
+    loadLeaderboard();
+  </script>
+</body>
+</html>

@@ -1,60 +1,44 @@
-# deploy/compose.yml
 services:
   db:
-    image: postgres:17.5
+    image: postgres:15
     environment:
-      POSTGRES_DB: ${DB_NAME:-supermario}
-      POSTGRES_USER: ${DB_USER:-mario}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-secret}
+      POSTGRES_DB: ${DB_NAME}
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    ports: ["${DB_PORT}:5432"]
     volumes:
-    - dbdata:/var/lib/postgresql/data
-    restart: unless-stopped
+      - supermario_db_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-mario} -d ${DB_NAME:-supermario}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      # use the env that actually exists inside the postgres container
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
-  service:
+  app:
+    build:
+      context: ../app
     image: ${IMAGE_REPO_APP}:${TAG}
     environment:
-      PORT: "8000"
-      APP_ENV: "production"
-      GUNICORN_WORKERS: "2"
-      DB_NAME: ${DB_NAME}
-      DB_USER: ${DB_USER}
-      DB_PASSWORD: ${DB_PASSWORD}
-      DB_HOST: db
-      DB_PORT: ${DB_PORT:-5432}
+      # inside the docker network postgres listens on 5432, not ${DB_PORT}
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
+      PORT: "${FLASK_PORT}"
     depends_on:
       db:
         condition: service_healthy
-    ports:
-    - "8000:8000"
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 10s
+    ports: ["8000:8000"]
 
-  front:
+  web:
+    build:
+      context: ../web
+      dockerfile: Dockerfile
     image: ${IMAGE_REPO_WEB}:${TAG}
-    ports:
-    - "80:80"
-    volumes:
-    - ./content/images:/usr/share/nginx/html/images:rw
+    ports: ["8081:80"]
     depends_on:
-      service:
+      app:
         condition: service_healthy
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost/health >/dev/null"]
-      interval: 10s
-      timeout: 3s
-      retries: 5
-      start_period: 5s
+    volumes:
+      - ../content/images:/usr/share/nginx/html/images:ro  # <-- was ./content/images
 
 volumes:
-  dbdata:
+  supermario_db_data:
