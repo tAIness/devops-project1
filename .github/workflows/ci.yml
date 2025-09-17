@@ -310,10 +310,10 @@ jobs:
           set -euo pipefail
           echo "Tree under results/:"
           find results -maxdepth 3 -type d -print
-          
+
           rm -rf merged
           mkdir -p merged
-          
+
           # copy everything found in the three artifacts
           for d in results/unit results/db results/e2e; do
             if [ -d "$d" ]; then
@@ -321,7 +321,7 @@ jobs:
               cp -R "$d"/. merged/
             fi
           done
-          
+
           echo "Total files in merged/: $(find merged -type f | wc -l)"
           test "$(find merged -type f | wc -l)" -gt 0
 
@@ -351,9 +351,8 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: public
-    
 
-    deploy-pages:
+  deploy-pages:
     if: always()
     needs: [ allure-report ]
     runs-on: ubuntu-latest
