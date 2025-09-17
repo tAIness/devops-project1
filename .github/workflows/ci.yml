@@ -125,7 +125,6 @@ jobs:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
 
-      # Build images used below
       - name: Build app image for E2E
         uses: docker/build-push-action@v6
         with:
@@ -205,25 +204,11 @@ jobs:
           node-version: 20
           cache: npm
 
-      - name: Install Node deps (root)
-        run: npm ci
-
-      - name: Install Allure reporter
-        run: npm i -D allure-playwright
-
-      - name: Install browsers
-        run: npx playwright install --with-deps
-
-      - name: Show what Playwright will run (spec discovery)
+      - name: Install Node deps
         run: |
-          echo "Trying common E2E locations…"
-          for g in \
-            'e2e/**/*.spec.ts' 'e2e/**/*.test.ts' \
-            'tests/**/*.spec.ts' 'tests/**/*.test.ts'
-          do
-            echo "== $g"; git ls-files "$g" || true
-          done
-          echo "If nothing shows up above, move your specs into e2e/ or update testDir in playwright.config.ts."
+          npm ci
+          npm i -D allure-playwright
+          npx playwright install --with-deps
 
       - name: Run Playwright tests (emit Allure)
         run: |
@@ -239,23 +224,12 @@ jobs:
           ls -lah allure-results || true
           echo "Count:" $(find allure-results -type f | wc -l)
 
-      - name: Prepare e2e results folder for artifact
-        if: always()
-        run: |
-          rm -rf e2e
-          mkdir -p e2e
-          if [ -d allure-results ]; then
-            mv allure-results e2e/allure-results
-          else
-            mkdir -p e2e/allure-results
-          fi
-
       - name: Upload e2e Allure results
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: allure-results-e2e
-          path: allure-results
+          path: allure-results          # <-- DO NOT MOVE IT BEFORE THIS
           if-no-files-found: error
 
   build:
@@ -296,60 +270,44 @@ jobs:
 
   # Merge Allure results from all test jobs, build report, publish to Pages
   allure-report:
-    name: Build Allure report (merged)
     runs-on: ubuntu-latest
     needs: [ unit-tests, db-tests, e2e ]
     if: always()
-    permissions:
-      contents: read
-      pages: write
-      id-token: write
     steps:
       - uses: actions/checkout@v4
 
-      # Download ALL artifacts whose names start with allure-results-
-      # (unit: allure-results-unit, db: allure-results-db, e2e: allure-results-e2e)
       - name: Download Allure artifacts
         uses: actions/download-artifact@v4
         with:
           pattern: allure-results-*
           merge-multiple: true
-          path: results               # results/** will contain the uploaded trees
+          path: results
 
-      # Collect every .../allure-results dir into one "merged" directory
       - name: Collect Allure result dirs
         shell: bash
         run: |
           set -euo pipefail
           echo "Tree under results/:"
           find results -maxdepth 3 -type d -print
-            
+
           rm -rf merged
           mkdir -p merged
-            
+
           mapfile -t dirs < <(find results -type d -name "allure-results")
           echo "Found ${#dirs[@]} allure-results directories:"
           printf ' - %s\n' "${dirs[@]:-}"
-            
+
           if [ "${#dirs[@]}" -eq 0 ]; then
             echo "ERROR: No allure-results directories found. Did the test jobs create them?"
             exit 1
           fi
-            
+
           for d in "${dirs[@]}"; do
             echo "Copying $d -> merged/"
             cp -R "$d/." merged/
           done
-            echo "Total files in merged/: $(find merged -type f | wc -l)"
+          echo "Total files in merged/: $(find merged -type f | wc -l)"
 
-      - name: Debug merged contents
-        run: |
-          echo "Files in merged/:"
-          find merged -maxdepth 2 -type f | head -20
-          echo "Total:" $(find merged -type f | wc -l)
-          grep -R '"name"' merged | head -10 || true
-
-      # Build the Allure HTML using the merged results
       - name: Generate Allure report
         uses: simple-elf/allure-report-action@v1.7
         with:
@@ -365,27 +323,11 @@ jobs:
           cp -R "public/allure/${{ github.run_id }}" public/allure/latest
           printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=allure/latest/index.html"><title>Allure Report</title><p><a href="allure/latest/index.html">Open the latest Allure report</a></p>' > public/index.html
 
-      - name: Debug count merged allure files
-        run: |
-          echo "Total files in merged/:"
-          find merged -type f | wc -l
-
-      # Make the site root redirect to the latest report
-      - name: Make root index redirect to latest Allure
-        shell: bash
-        run: |
-          set -e
-          sudo chown -R "$USER:$(id -gn)" public || true
-          mkdir -p public/allure
-          rm -rf public/allure/latest
-          cp -R "public/allure/${{ github.run_id }}" public/allure/latest
-          printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=allure/latest/index.html"><title>Allure Report</title><p><a href="allure/latest/index.html">Open the latest Allure report</a></p>' > public/index.html
-
-      # Upload the static site to the Pages artifact named "github-pages"
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
           path: public
+  
 
   deploy-pages:
     if: always()
