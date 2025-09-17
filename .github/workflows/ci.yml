@@ -349,21 +349,14 @@ jobs:
       - name: Generate Allure report
         uses: simple-elf/allure-report-action@v1.7
         with:
-          allure_results: |
-            results/unit/allure-results
-            results/db/allure-results
-            results/e2e/allure-results
+          allure_results: merged
           allure_report: public/allure/${{ github.run_id }}
           keep_reports: 10
 
       - name: Debug count merged allure files
         run: |
-          set -e
-          for p in results/unit/allure-results results/db/allure-results results/e2e/allure-results; do
-            echo ">>> $p"
-            [ -d "$p" ] || { echo "MISSING: $p"; exit 1; }
-            find "$p" -type f | wc -l
-          done
+          echo "Total files in merged/:"
+          find merged -type f | wc -l
 
       # Make the site root redirect to the latest report
       - name: Make root index redirect to latest Allure
