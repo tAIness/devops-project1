@@ -289,21 +289,15 @@ jobs:
           set -euo pipefail
           echo "Tree under results/:"
           find results -maxdepth 3 -type d -print
-
           rm -rf merged
           mkdir -p merged
-
           mapfile -t dirs < <(find results -type d -name "allure-results")
-          echo "Found ${#dirs[@]} allure-results directories:"
+          echo "Merging ${#dirs[@]} allure-results dirs:"
           printf ' - %s\n' "${dirs[@]:-}"
-
           if [ "${#dirs[@]}" -eq 0 ]; then
-            echo "ERROR: No allure-results directories found. Did the test jobs create them?"
-            exit 1
+            echo "ERROR: No allure-results directories found."; exit 1
           fi
-
           for d in "${dirs[@]}"; do
-            echo "Copying $d -> merged/"
             cp -R "$d/." merged/
           done
           echo "Total files in merged/: $(find merged -type f | wc -l)"
@@ -314,15 +308,9 @@ jobs:
           allure_results: merged
           allure_report: public/allure/latest
           keep_reports: 10
-          gh_pages: gh-pages
-          allure_history: allure-history
-          github_run_num: ${{ github.run_number }}
-          github_run_id: ${{ github.run_id }}
-          github_repo: ${{ github.repository }}
-          github_repo_owner: ${{ github.repository_owner }}
 
-      - name: Fix ownership of generated files
-        run: sudo chown -R "$USER:$(id -gn)" public || true
+      - name: Fix permissions for Pages files
+        run: sudo chown -R $USER:$(id -gn) public || true
 
       - name: Create root index that redirects to latest
         run: |
