@@ -59,14 +59,15 @@ jobs:
           rm -rf allure-results
           mkdir -p allure-results
           python -m pytest -ra -m "not db" --junitxml=pytest-results.xml --alluredir=allure-results
+
       - name: Upload unit JUnit & Allure
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: allure-results-unit
           path: |
-            app/allure-results
-            app/pytest-results.xml
+            allure-results
+            pytest-results.xml
 
   db-tests:
     runs-on: ubuntu-latest
@@ -105,14 +106,15 @@ jobs:
           rm -rf allure-results
           mkdir -p allure-results
           python -m pytest -ra -m db tests/test_db.py --junitxml=pytest-results.xml --alluredir=allure-results
+
       - name: Upload DB JUnit & Allure
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: allure-results-db
           path: |
-            app/allure-results
-            app/pytest-results.xml
+            allure-results
+            pytest-results.xml
 
   e2e:
     runs-on: ubuntu-latest
@@ -345,7 +347,6 @@ jobs:
       - name: Generate Allure report
         uses: simple-elf/allure-report-action@v1.7
         with:
-          # one path per line – this reliably merges all sources
           allure_results: |
             results/unit/allure-results
             results/db/allure-results
