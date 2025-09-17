@@ -200,9 +200,22 @@ jobs:
         with:
           node-version: 20
           cache: npm
-      - run: npm ci
-      - run: npm i -D allure-playwright
-      - run: npx playwright install --with-deps
+
+      - name: Install Node deps (root)
+        run: npm ci
+
+      - name: Install Allure reporter
+        run: npm i -D allure-playwright
+
+      - name: Show what Playwright will run
+        run: |
+            echo "Looking for specs under $(node -e "console.log(require('./playwright.config').testDir || 'tests')")"
+            echo "Spec files found:"
+            git ls-files 'e2e/**/*.spec.ts' 'e2e/**/*.test.ts' 'tests/**/*.spec.ts' 'tests/**/*.test.ts' || true
+            echo "If you see nothing above, your testDir may be wrong."
+
+      - name: Install browsers
+        run: npx playwright install --with-deps
 
       - name: Run Playwright tests (emit Allure)
         run: |
