@@ -312,7 +312,7 @@ jobs:
         uses: simple-elf/allure-report-action@v1.7
         with:
           allure_results: merged
-          allure_report: public/allure/latest   # <— write straight to “latest”
+          allure_report: public/allure/latest
           keep_reports: 10
           gh_pages: gh-pages
           allure_history: allure-history
@@ -320,6 +320,9 @@ jobs:
           github_run_id: ${{ github.run_id }}
           github_repo: ${{ github.repository }}
           github_repo_owner: ${{ github.repository_owner }}
+
+      - name: Fix ownership of generated files
+        run: sudo chown -R "$USER:$(id -gn)" public || true
 
       - name: Create root index that redirects to latest
         run: |
