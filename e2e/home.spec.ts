@@ -11,6 +11,13 @@ test('home: validate structure, content, navigation, and external links', async 
   await allure.severity('critical');
   await allure.description('Validates all visible content, cards, links, images, and footer on homepage. Ensures external link matches Nintendo official page.');
 
+  // === Navigate and wait for critical element ===
+  await test.step('Navigate to homepage and wait for content', async () => {
+    await page.goto('/');
+    // Wait for hero header — ensures page is rendered before assertions
+    await page.waitForSelector('header.site-header h1', { timeout: 10000 });
+  });
+
   // === Step 1: Validate page metadata ===
   await test.step('Page has correct title and viewport', async () => {
     await expect(page).toHaveTitle('Super Mario — Static Site');
@@ -100,9 +107,6 @@ test('home: validate structure, content, navigation, and external links', async 
     }
   });
 
-  // === Optional: Attach full HTML for deep debugging ===
+  // === Attach full HTML for deep debugging ===
   await allure.attachment('Homepage Raw HTML', await page.content(), 'text/html');
-
-  // === Optional: Attach final screenshot (if needed for visual review) ===
-  await allure.attachment('Final Screenshot', await page.screenshot({ fullPage: true }), 'image/png');
 });
