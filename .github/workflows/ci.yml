@@ -228,7 +228,6 @@ jobs:
       - name: Run Playwright tests (emit Allure)
         run: |
           rm -rf allure-results
-          # Allure reporter writes here by default as well:
           ALLURE_RESULTS_DIR=allure-results npx playwright test
         env:
           BASE_URL: http://127.0.0.1:8081
@@ -256,8 +255,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: allure-results-e2e
-          path: e2e/allure-results
-
+          path: allure-results
+          if-no-files-found: error
 
   build:
     runs-on: ubuntu-latest
@@ -314,7 +313,7 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           pattern: allure-results-*
-          merge-multiple: true        # put all artifacts into the same target dir
+          merge-multiple: true
           path: results               # results/** will contain the uploaded trees
 
       # Collect every .../allure-results dir into one "merged" directory
@@ -322,28 +321,33 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "Listing downloaded results tree:"
-          find results -maxdepth 4 -type d -print
-
+          echo "Tree under results/:"
+          find results -maxdepth 3 -type d -print
+            
           rm -rf merged
           mkdir -p merged
-
+            
           mapfile -t dirs < <(find results -type d -name "allure-results")
           echo "Found ${#dirs[@]} allure-results directories:"
           printf ' - %s\n' "${dirs[@]:-}"
-
+            
           if [ "${#dirs[@]}" -eq 0 ]; then
             echo "ERROR: No allure-results directories found. Did the test jobs create them?"
             exit 1
           fi
-
-          # Copy all result files into one place
+            
           for d in "${dirs[@]}"; do
+            echo "Copying $d -> merged/"
             cp -R "$d/." merged/
           done
+            echo "Total files in merged/: $(find merged -type f | wc -l)"
 
-          echo "Total result files copied:"
-          find merged -type f | wc -l
+      - name: Debug merged contents
+        run: |
+          echo "Files in merged/:"
+          find merged -maxdepth 2 -type f | head -20
+          echo "Total:" $(find merged -type f | wc -l)
+          grep -R '"name"' merged | head -10 || true
 
       # Build the Allure HTML using the merged results
       - name: Generate Allure report
@@ -352,6 +356,14 @@ jobs:
           allure_results: merged
           allure_report: public/allure/${{ github.run_id }}
           keep_reports: 10
+
+      - name: Root redirect to latest report
+        shell: bash
+        run: |
+          mkdir -p public/allure
+          rm -rf public/allure/latest
+          cp -R "public/allure/${{ github.run_id }}" public/allure/latest
+          printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=allure/latest/index.html"><title>Allure Report</title><p><a href="allure/latest/index.html">Open the latest Allure report</a></p>' > public/index.html
 
       - name: Debug count merged allure files
         run: |
