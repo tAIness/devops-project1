@@ -195,7 +195,7 @@ jobs:
           done
           echo "Web didn't become ready"; docker logs web; exit 1
 
-      # Playwright (+ Allure reporter)
+      # --- Playwright (+ Allure) ---
       - uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -207,19 +207,24 @@ jobs:
       - name: Install Allure reporter
         run: npm i -D allure-playwright
 
-      - name: Show what Playwright will run
-        run: |
-            echo "Looking for specs under $(node -e "console.log(require('./playwright.config').testDir || 'tests')")"
-            echo "Spec files found:"
-            git ls-files 'e2e/**/*.spec.ts' 'e2e/**/*.test.ts' 'tests/**/*.spec.ts' 'tests/**/*.test.ts' || true
-            echo "If you see nothing above, your testDir may be wrong."
-
       - name: Install browsers
         run: npx playwright install --with-deps
+
+      - name: Show what Playwright will run (spec discovery)
+        run: |
+          echo "Trying common E2E locations…"
+          for g in \
+            'e2e/**/*.spec.ts' 'e2e/**/*.test.ts' \
+            'tests/**/*.spec.ts' 'tests/**/*.test.ts'
+          do
+            echo "== $g"; git ls-files "$g" || true
+          done
+          echo "If nothing shows up above, move your specs into e2e/ or update testDir in playwright.config.ts."
 
       - name: Run Playwright tests (emit Allure)
         run: |
           rm -rf allure-results
+          # Allure reporter writes here by default as well:
           ALLURE_RESULTS_DIR=allure-results npx playwright test
         env:
           BASE_URL: http://127.0.0.1:8081
@@ -227,8 +232,9 @@ jobs:
       - name: Debug list e2e allure results
         if: always()
         run: |
+          echo "Files in allure-results:"
           ls -lah allure-results || true
-          find allure-results -type f | wc -l || true     
+          echo "Count:" $(find allure-results -type f | wc -l)
 
       - name: Prepare e2e results folder for artifact
         if: always()
@@ -247,6 +253,7 @@ jobs:
         with:
           name: allure-results-e2e
           path: e2e/allure-results
+
 
   build:
     runs-on: ubuntu-latest
