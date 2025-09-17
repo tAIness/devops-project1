@@ -12,6 +12,7 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,     // retry flaky tests in CI
   workers: process.env.CI ? 2 : undefined,
   reporter: [
+    ['junit', { outputFile: 'e2e/junit.xml' }],
     ['line'],
     ['allure-playwright', {
       detail: true,
