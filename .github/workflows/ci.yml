@@ -284,44 +284,66 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Download Allure artifacts
+      # ⬇️ Download artifacts into separate subfolders
+      - name: Download Allure artifacts (unit)
         uses: actions/download-artifact@v4
         with:
-          pattern: allure-results-*
-          merge-multiple: true
-          path: results
+          name: allure-results-unit
+          path: results/unit
 
-      - name: Collect Allure result dirs
+      - name: Download Allure artifacts (db)
+        uses: actions/download-artifact@v4
+        with:
+          name: allure-results-db
+          path: results/db
+
+      - name: Download Allure artifacts (e2e)
+        uses: actions/download-artifact@v4
+        with:
+          name: allure-results-e2e
+          path: results/e2e
+
+      # ⬇️ Merge all result files into one folder
+      - name: Merge Allure result files
         shell: bash
         run: |
           set -euo pipefail
           echo "Tree under results/:"
           find results -maxdepth 3 -type d -print
+          
           rm -rf merged
           mkdir -p merged
-          mapfile -t dirs < <(find results -type d -name "allure-results")
-          echo "Merging ${#dirs[@]} allure-results dirs:"
-          printf ' - %s\n' "${dirs[@]:-}"
-          if [ "${#dirs[@]}" -eq 0 ]; then
-            echo "ERROR: No allure-results directories found."; exit 1
-          fi
-          for d in "${dirs[@]}"; do
-            cp -R "$d/." merged/
+          
+          # copy everything found in the three artifacts
+          for d in results/unit results/db results/e2e; do
+            if [ -d "$d" ]; then
+              echo "Copying $d -> merged/"
+              cp -R "$d"/. merged/
+            fi
           done
+          
           echo "Total files in merged/: $(find merged -type f | wc -l)"
+          test "$(find merged -type f | wc -l)" -gt 0
 
+      # ⬇️ Build the Allure HTML from the merged folder
       - name: Generate Allure report
         uses: simple-elf/allure-report-action@v1.7
         with:
-          allure_results: merged
+          allure_results: merged          # <— use the merged folder
           allure_report: public/allure/latest
           keep_reports: 10
+          gh_pages: gh-pages
+          allure_history: allure-history
+          github_run_num: ${{ github.run_number }}
+          github_run_id: ${{ github.run_id }}
+          github_repo: ${{ github.repository }}
+          github_repo_owner: ${{ github.repository_owner }}
 
-      - name: Fix permissions for Pages files
-        run: sudo chown -R $USER:$(id -gn) public || true
-
-      - name: Create root index that redirects to latest
+      # ⬇️ Create a root redirect and fix perms (the action runs in a container)
+      - name: Add root index + fix perms
+        shell: bash
         run: |
+          sudo chown -R "$USER:$(id -gn)" public || true
           mkdir -p public
           printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=allure/latest/index.html"><title>Allure Report</title><p><a href="allure/latest/index.html">Open the latest Allure report</a></p>' > public/index.html
 
@@ -329,8 +351,9 @@ jobs:
         uses: actions/upload-pages-artifact@v3
         with:
           path: public
+    
 
-  deploy-pages:
+    deploy-pages:
     if: always()
     needs: [ allure-report ]
     runs-on: ubuntu-latest
