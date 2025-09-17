@@ -1,40 +1,36 @@
-# yamllint disable rule:line-length rule:indentation
----
+# .github/workflows/ci.yml
 name: CI (PR checks)
 
 on:
   pull_request:
-    branches:
-      - main
+    branches: [ main ]
 
 permissions:
   contents: read
-  pages: write          # for deploy-pages
-  id-token: write       # for deploy-pages OIDC
+  pages: write        # for deploy-pages
+  id-token: write     # for deploy-pages OIDC
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+
   lint:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: app/requirements.txt
-
       - name: Install deps for lint
         run: |
           python -m pip install -U pip
           pip install -r app/requirements.txt
           pip install "pylint==3.2.*"
-
       - name: Run pylint (in app/)
         working-directory: app
         run: python -m pylint --disable=C0114,C0116,W0718,W0212 *.py
@@ -44,7 +40,6 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
@@ -67,13 +62,6 @@ jobs:
           mkdir -p allure-results
           python -m pytest -ra -m "not db" --junitxml=pytest-results.xml --alluredir=allure-results
 
-      - name: Debug list unit allure results
-        if: always()
-        working-directory: app
-        run: |
-          ls -lah allure-results || true
-          find allure-results -type f | wc -l
-
       - name: Upload unit JUnit & Allure
         if: always()
         uses: actions/upload-artifact@v4
@@ -82,11 +70,11 @@ jobs:
           path: |
             app/allure-results
             app/pytest-results.xml
+          if-no-files-found: error
 
   db-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15
-
     services:
       postgres:
         image: postgres:15
@@ -101,38 +89,26 @@ jobs:
           --health-interval=10s
           --health-timeout=5s
           --health-retries=5
-
     env:
       DB_NAME: supermario
       DB_USER: mario
       DB_PASSWORD: secret
       DB_HOST: 127.0.0.1
       DB_PORT: 5432
-
     steps:
       - uses: actions/checkout@v4
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-
       - name: Install dependencies
         run: |
           pip install -r app/requirements.txt pytest psycopg2-binary allure-pytest
-
       - name: Run DB tests only + Allure
         working-directory: app
         run: |
           rm -rf allure-results
           mkdir -p allure-results
           python -m pytest -ra -m db tests/test_db.py --junitxml=pytest-results.xml --alluredir=allure-results
-
-      - name: Debug list db allure results
-        if: always()
-        working-directory: app
-        run: |
-          ls -lah allure-results || true
-          find allure-results -type f | wc -l
 
       - name: Upload DB JUnit & Allure
         if: always()
@@ -142,13 +118,13 @@ jobs:
           path: |
             app/allure-results
             app/pytest-results.xml
+          if-no-files-found: error
 
   e2e:
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
-
       - uses: docker/setup-buildx-action@v3
 
       - name: Build app image for E2E
@@ -224,30 +200,31 @@ jobs:
           done
           echo "Web didn't become ready"; docker logs web; exit 1
 
-      # Playwright (+ Allure reporter via CLI)
+      # --- Playwright (+ Allure) ---
       - uses: actions/setup-node@v4
         with:
           node-version: 20
           cache: npm
 
-      - run: npm ci
-
-      - run: npm i -D allure-playwright
-
-      - run: npx playwright install --with-deps
+      - name: Install Node deps
+        run: |
+          npm ci
+          npm i -D allure-playwright
+          npx playwright install --with-deps
 
       - name: Run Playwright tests (emit Allure)
         run: |
-          mkdir -p allure-results
-          ALLURE_RESULTS_DIR=allure-results npx playwright test --reporter=line,allure-playwright
+          rm -rf allure-results
+          ALLURE_RESULTS_DIR=allure-results npx playwright test
         env:
           BASE_URL: http://127.0.0.1:8081
 
       - name: Debug list e2e allure results
         if: always()
         run: |
+          echo "Files in allure-results:"
           ls -lah allure-results || true
-          find allure-results -type f | wc -l
+          echo "Count:" $(find allure-results -type f | wc -l)
 
       - name: Upload e2e Allure results
         if: always()
@@ -255,15 +232,22 @@ jobs:
         with:
           name: allure-results-e2e
           path: allure-results
+          if-no-files-found: error
+
+      - name: Upload e2e JUnit XML
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-e2e
+          path: e2e/junit.xml
+          if-no-files-found: error
 
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-
       - uses: docker/setup-buildx-action@v3
-
       - name: Build app image (no push on PR)
         uses: docker/build-push-action@v6
         with:
@@ -273,7 +257,7 @@ jobs:
           tags: local/app:pr-check
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
+          
       - name: Build web image (no push on PR)
         uses: docker/build-push-action@v6
         with:
@@ -295,64 +279,76 @@ jobs:
       severity: critical
       upload_artifacts: true
 
+  # Merge Allure results from all test jobs, build report, publish to Pages
   allure-report:
-    name: Build Allure report (merged)
     runs-on: ubuntu-latest
-    needs:
-      - unit-tests
-      - db-tests
-      - e2e
+    needs: [ unit-tests, db-tests, e2e ]
     if: always()
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/download-artifact@v4
+      # Download artifacts into separate subfolders
+      - name: Download Allure artifacts (unit)
+        uses: actions/download-artifact@v4
         with:
           name: allure-results-unit
           path: results/unit
 
-      - uses: actions/download-artifact@v4
+      - name: Download Allure artifacts (db)
+        uses: actions/download-artifact@v4
         with:
           name: allure-results-db
           path: results/db
 
-      - uses: actions/download-artifact@v4
+      - name: Download Allure artifacts (e2e)
+        uses: actions/download-artifact@v4
         with:
           name: allure-results-e2e
           path: results/e2e
 
-      - name: Debug count merged allure files
+      # Merge all result files into one folder
+      - name: Merge Allure result files
+        shell: bash
         run: |
-          echo "Unit:" $(find results/unit/allure-results -type f 2>/dev/null | wc -l)
-          echo "DB:"   $(find results/db/allure-results   -type f 2>/dev/null | wc -l)
-          echo "E2E:"  $(find results/e2e/allure-results  -type f 2>/dev/null | wc -l)
-          total=$(find results -path "*/allure-results/*" -type f 2>/dev/null | wc -l)
-          if [ "$total" -eq 0 ]; then
-            echo "No Allure files found – check test jobs."; exit 1
-          fi
+          set -euo pipefail
+          echo "Tree under results/:"
+          find results -maxdepth 3 -type d -print
 
+          rm -rf merged
+          mkdir -p merged
+
+          # copy everything found in the three artifacts
+          for d in results/unit results/db results/e2e; do
+            if [ -d "$d" ]; then
+              echo "Copying $d -> merged/"
+              cp -R "$d"/. merged/
+            fi
+          done
+
+          echo "Total files in merged/: $(find merged -type f | wc -l)"
+          test "$(find merged -type f | wc -l)" -gt 0
+
+      # Build the Allure HTML from the merged folder
       - name: Generate Allure report
         uses: simple-elf/allure-report-action@v1.7
         with:
-          allure_results: results/unit/allure-results,results/db/allure-results,results/e2e/allure-results
-          allure_report: public/allure/${{ github.run_id }}
+          allure_results: merged
+          allure_report: public/allure/latest
           keep_reports: 10
+          gh_pages: gh-pages
+          allure_history: allure-history
+          github_run_num: ${{ github.run_number }}
+          github_run_id: ${{ github.run_id }}
+          github_repo: ${{ github.repository }}
+          github_repo_owner: ${{ github.repository_owner }}
 
-      - name: Fix permissions on generated report
-        run: sudo chown -R $USER:$(id -gn) public || true
-
-      - name: Make root index redirect to latest Allure
+      # Create a root redirect and fix perms (the action runs in a container)
+      - name: Add root index + fix perms
+        shell: bash
         run: |
-          set -e
-          mkdir -p public/allure
-          rm -rf public/allure/latest
-          cp -r "public/allure/${{ github.run_id }}" public/allure/latest
-          cat > public/index.html <<'HTML'
-          <!doctype html><meta charset="utf-8">
-          <meta http-equiv="refresh" content="0; url=allure/latest/index.html">
-          <title>Allure Report</title>
-          <p><a href="allure/latest/index.html">Go to the latest Allure report</a></p>
-          HTML
+          sudo chown -R "$USER:$(id -gn)" public || true
+          mkdir -p public
+          printf '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="0; url=allure/latest/index.html"><title>Allure Report</title><p><a href="allure/latest/index.html">Open the latest Allure report</a></p>' > public/index.html
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
@@ -361,12 +357,15 @@ jobs:
 
   deploy-pages:
     if: always()
-    needs:
-      - allure-report
+    needs: [ allure-report ]
     runs-on: ubuntu-latest
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+
