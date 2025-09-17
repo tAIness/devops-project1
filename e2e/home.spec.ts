@@ -21,14 +21,16 @@ test('home: validate structure, content, navigation, and external links', async 
   // === Step 1: Validate page metadata ===
   await test.step('Page has correct title and viewport', async () => {
     await expect(page).toHaveTitle('Super Mario — Static Site');
-    const viewport = await page.getAttribute('meta[name="viewport"]', 'content');
+    const viewportMeta = page.locator('meta[name="viewport"]');
+    await expect(viewportMeta).toBeAttached(); // ✅ Correct for <meta>
+    const viewport = await viewportMeta.getAttribute('content');
     expect(viewport).toBe('width=device-width, initial-scale=1');
   });
 
   // === Step 2: Validate CSS is loaded ===
   await test.step('CSS stylesheet is loaded', async () => {
     const cssLink = page.locator('link[rel="stylesheet"][href="/css/site.css"]');
-    await expect(cssLink).toBeVisible();
+    await expect(cssLink).toBeAttached(); // ✅ Correct for <link> — NOT toBeVisible()
   });
 
   // === Step 3: Validate hero header content ===
