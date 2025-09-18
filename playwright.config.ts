@@ -12,7 +12,7 @@ export default defineConfig({
   reporter: [
     ['line'],
     ['junit', { outputFile: 'e2e/junit.xml' }],
-    ['allure-playwright', { detail: true, suiteTitle: false }],
+    ['allure-playwright', { outputFolder: 'allure-results', detail: true, suiteTitle: false }],
   ],
   outputDir: 'test-results',
   use: {
