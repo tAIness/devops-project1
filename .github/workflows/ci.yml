@@ -257,7 +257,7 @@ jobs:
           tags: local/app:pr-check
           cache-from: type=gha
           cache-to: type=gha,mode=max
-          
+
       - name: Build web image (no push on PR)
         uses: docker/build-push-action@v6
         with:
