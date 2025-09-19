@@ -26,5 +26,11 @@ export default defineConfig({
     // { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
     // { name: 'webkit',  use: { ...devices['Desktop Safari'] } },
   ],
+  webServer: {
+  command: 'npx http-server ./web -p 8081 -c-1',  // or your real start command
+  url: 'http://127.0.0.1:8081',
+  timeout: 120_000,
+  reuseExistingServer: !process.env.CI,
+},
 });
 
