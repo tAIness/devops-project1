@@ -22,3 +22,7 @@ __pycache__/
 .venv/
 venv/
 .env
+
+#tests
+allure-results
+e2e/junit.xml

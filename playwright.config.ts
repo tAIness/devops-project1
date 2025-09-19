@@ -10,9 +10,9 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 2 : undefined,
   reporter: [
-    ['line'],
-    ['junit', { outputFile: 'e2e/junit.xml' }],
-    ['allure-playwright', { detail: true, suiteTitle: false }],
+  ['line'],
+  ['junit', { outputFile: 'e2e/junit.xml' }],
+  ['allure-playwright', { outputFolder: 'allure-results', detail: true, suiteTitle: true }],
   ],
   outputDir: 'test-results',
   use: {
@@ -26,5 +26,10 @@ export default defineConfig({
     // { name: 'firefox', use: { ...devices['Desktop Firefox'] } },
     // { name: 'webkit',  use: { ...devices['Desktop Safari'] } },
   ],
+  webServer: {
+  command: 'echo CI server is external',
+  url: 'http://127.0.0.1:8081',
+  reuseExistingServer: true,   // <— crucial to avoid the port-in-use error
+}
 });
 

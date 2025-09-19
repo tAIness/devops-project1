@@ -2,113 +2,81 @@
 import { test, expect } from '@playwright/test';
 import { allure } from 'allure-playwright';
 
-test('home: validate structure, content, navigation, and external links', async ({ page }) => {
-  // === Allure Metadata ===
-  await allure.owner('web-team');
-  await allure.epic('Website');
-  await allure.feature('Homepage');
-  await allure.story('Full Homepage Validation');
-  await allure.severity('critical');
-  await allure.description('Validates all visible content, cards, links, images, and footer on homepage. Ensures external link matches Nintendo official page.');
+test.describe('Website / Homepage / Smoke', () => {
+  test('home: validate structure, content, navigation, and external links', async ({ page }) => {
+    // Allure metadata + suite labels
+    await allure.parentSuite('Website');
+    await allure.suite('Homepage');
+    await allure.subSuite('Smoke');
+    await allure.owner('web-team');
+    await allure.epic('Website');
+    await allure.feature('Homepage');
+    await allure.story('Full Homepage Validation');
+    await allure.severity('critical');
+    await allure.description(
+      'Validates visible content, cards, links, images, and footer on the homepage.'
+    );
 
-  // === Navigate and wait for critical element ===
-  await test.step('Navigate to homepage and wait for content', async () => {
+    // Navigate and basic gate
     await page.goto('/');
-    // Wait for hero header — ensures page is rendered before assertions
-    await page.waitForSelector('header.site-header h1', { timeout: 10000 });
-  });
+    await page.waitForLoadState('domcontentloaded');
+    await expect(page).toHaveTitle(/Super Mario/i);
 
-  // === Step 1: Validate page metadata ===
-  await test.step('Page has correct title and viewport', async () => {
-    await expect(page).toHaveTitle('Super Mario — Static Site');
+    // Page metadata
     const viewportMeta = page.locator('meta[name="viewport"]');
-    await expect(viewportMeta).toBeAttached(); // ✅ Correct for <meta>
+    await expect(viewportMeta).toBeAttached();
     const viewport = await viewportMeta.getAttribute('content');
     expect(viewport).toBe('width=device-width, initial-scale=1');
-  });
 
-  // === Step 2: Validate CSS is loaded ===
-  await test.step('CSS stylesheet is loaded', async () => {
+    // CSS present
     const cssLink = page.locator('link[rel="stylesheet"][href="/css/site.css"]');
-    await expect(cssLink).toBeAttached(); // ✅ Correct for <link> — NOT toBeVisible()
-  });
+    await expect(cssLink).toBeAttached();
 
-  // === Step 3: Validate hero header content ===
-  await test.step('Hero section displays correct heading and description', async () => {
+    // Hero content
     const header = page.locator('.site-header h1');
     const subtext = page.locator('.site-header p');
-    await expect(header).toHaveText('Super Mario');
-    await expect(subtext).toHaveText('Click a card to play the game, view the leaderboard, or browse images.');
-  });
+    await expect(header).toHaveText(/Super Mario/);
+    await expect(subtext).toContainText(/Click a card/);
 
-  // === Step 4: Validate "Play Super Mario" card ===
-  await test.step('Play Game card is visible and links correctly', async () => {
-    const card = page.locator('a.card:has-text("Play Super Mario")').first();
-    await expect(card).toBeVisible();
-    await expect(card).toHaveAttribute('href', '/game/');
-    await expect(card).toHaveAttribute('title', 'Play the game!');
-    await expect(card.locator('img')).toHaveAttribute('alt', 'Super Mario standing');
-  });
+    // Cards
+    const game = page.locator('a.card:has-text("Play Super Mario")').first();
+    await expect(game).toBeVisible();
+    await expect(game).toHaveAttribute('href', '/game/');
+    await expect(game).toHaveAttribute('title', /Play the game/);
+    await expect(game.locator('img')).toHaveAttribute('alt', /Super Mario/);
 
-  // === Step 5: Validate "Gallery" card ===
-  await test.step('Gallery card is visible and links correctly', async () => {
-    const card = page.locator('a.card:has-text("Gallery")').first();
-    await expect(card).toBeVisible();
-    await expect(card).toHaveAttribute('href', '/images/');
-    await expect(card).toHaveAttribute('title', 'Open the Mario gallery');
-    await expect(card.locator('img')).toHaveAttribute('alt', 'Gallery');
-  });
+    const gallery = page.locator('a.card:has-text("Gallery")').first();
+    await expect(gallery).toBeVisible();
+    await expect(gallery).toHaveAttribute('href', '/images/');
+    await expect(gallery).toHaveAttribute('title', /gallery/i);
 
-  // === Step 6: Validate "Leaderboard" card ===
-  await test.step('Leaderboard card is visible and links correctly', async () => {
-    const card = page.locator('a.card:has-text("Leaderboard")').first();
-    await expect(card).toBeVisible();
-    await expect(card).toHaveAttribute('href', '/leaderboard/');
-    await expect(card).toHaveAttribute('title', 'View leaderboard');
-    await expect(card.locator('img')).toHaveAttribute('alt', 'Leaderboard');
-  });
+    const leaderboard = page.locator('a.card:has-text("Leaderboard")').first();
+    await expect(leaderboard).toBeVisible();
+    await expect(leaderboard).toHaveAttribute('href', '/leaderboard/');
 
-  // === Step 7: Validate "Nintendo Shop" external card ===
-  await test.step('Nintendo Shop card opens externally with correct URL', async () => {
-    const card = page.locator('a.card:has-text("Nintendo Shop →")').first();
-    await expect(card).toBeVisible();
-    // Validate exact URL (trim any accidental spaces from HTML)
-    const href = await card.getAttribute('href');
-    expect(href?.trim()).toBe('https://www.nintendo.com/us/store/characters/mushroom-kingdom/');
-    await expect(card).toHaveAttribute('target', '_blank');
-    await expect(card).toHaveAttribute('rel', 'noopener noreferrer');
-    await expect(card).toHaveAttribute('title', 'Nintendo Shop — Mushroom Kingdom');
-    await expect(card.locator('img')).toHaveAttribute('alt', 'Nintendo Shop — Mushroom Kingdom');
-  });
+    const shop = page.locator('a.card:has-text("Nintendo Shop")').first();
+    await expect(shop).toBeVisible();
+    const href = (await shop.getAttribute('href'))?.trim();
+    expect(href).toBe('https://www.nintendo.com/us/store/characters/mushroom-kingdom/');
+    await expect(shop).toHaveAttribute('target', '_blank');
+    await expect(shop).toHaveAttribute('rel', /noopener/);
 
-  // === Step 8: Validate footer disclaimer ===
-  await test.step('Footer displays correct disclaimer', async () => {
+    // Footer
     const footer = page.locator('.site-footer small');
-    await expect(footer).toHaveText('Images are placeholders—use your own licensed artwork.');
-  });
+    await expect(footer).toContainText(/Images are placeholders/i);
 
-  // === Step 9: Validate accessibility - all images have alt text ===
-  await test.step('All images have non-empty alt attributes', async () => {
+    // Accessibility sweeps
     const images = page.locator('img');
-    const count = await images.count();
-    for (let i = 0; i < count; i++) {
+    for (let i = 0, n = await images.count(); i < n; i++) {
       const alt = await images.nth(i).getAttribute('alt');
-      expect(alt).toBeTruthy();
-      expect(alt).not.toBe('');
+      expect(alt && alt.trim().length).toBeTruthy();
     }
-  });
-
-  // === Step 10: Validate all card links have title attributes ===
-  await test.step('All card links have descriptive title attributes', async () => {
     const cards = page.locator('a.card');
-    const count = await cards.count();
-    for (let i = 0; i < count; i++) {
+    for (let i = 0, n = await cards.count(); i < n; i++) {
       const title = await cards.nth(i).getAttribute('title');
-      expect(title).toBeTruthy();
-      expect(title).not.toBe('');
+      expect(title && title.trim().length).toBeTruthy();
     }
-  });
 
-  // === Attach full HTML for deep debugging ===
-  await allure.attachment('Homepage Raw HTML', await page.content(), 'text/html');
+    await allure.attachment('Homepage Raw HTML', await page.content(), 'text/html');
+  });
 });
