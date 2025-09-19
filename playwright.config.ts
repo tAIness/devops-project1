@@ -10,9 +10,9 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 2 : undefined,
   reporter: [
-    ['line'],
-    ['junit', { outputFile: 'e2e/junit.xml' }],
-    ['allure-playwright', { outputFolder: 'allure-results', detail: true, suiteTitle: false }],
+  ['line'],
+  ['junit', { outputFile: 'e2e/junit.xml' }],
+  ['allure-playwright', { outputFolder: 'allure-results', detail: true, suiteTitle: true }],
   ],
   outputDir: 'test-results',
   use: {

@@ -2,15 +2,17 @@
 import { test, expect } from '@playwright/test';
 import { allure } from 'allure-playwright';
 
-test('home: validate structure, content, navigation, and external links', async ({ page }) => {
-  // === Allure Metadata ===
-  await allure.owner('web-team');
-  await allure.epic('Website');
-  await allure.feature('Homepage');
-  await allure.story('Full Homepage Validation');
-  await allure.severity('critical');
-  await allure.description('Validates all visible content, cards, links, images, and footer on homepage. Ensures external link matches Nintendo official page.');
+test.describe('Website / Homepage / Smoke', () => {
+  test('home: validate structure, content, navigation, and external links', async ({ page }) => {
+    await allure.owner('web-team');
+    await allure.epic('Website');
+    await allure.feature('Homepage');
+    await allure.story('Full Homepage Validation');
+    await allure.severity('critical');
+    await allure.description('Validates all visible content, cards, links, images, and footer on homepage. Ensures external link matches Nintendo official page.');
 
+    await page.goto('/');
+    await expect(page).toHaveTitle(/Super Mario/i); // more robust gate than the strict header selector
   // === Navigate and wait for critical element ===
   await test.step('Navigate to homepage and wait for content', async () => {
     await page.goto('/');
