@@ -65,14 +65,13 @@ jobs:
           elif [[ "${{ github.ref_type }}" == "tag" ]]; then
             echo "IMAGE_TAG=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
           else
-            # fallback: commit SHA (no 'edge')
             echo "IMAGE_TAG=${{ github.sha }}" >> "$GITHUB_OUTPUT"
           fi
 
   build-and-push-app:
     name: Build & push app image
     runs-on: ubuntu-latest
-    needs: [ setup ]
+    needs: [setup]
     env:
       IMAGE_TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -138,36 +137,25 @@ jobs:
           envs: IMAGE_TAG,DOCKERHUB_REPO_APP,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,NEXUS_USERNAME,NEXUS_PASSWORD,NEXUS_REPO_APP
           script: |
             set -euo pipefail
-            # Install skopeo if missing
             if ! command -v skopeo >/dev/null 2>&1; then
               sudo apt-get update -y
               sudo apt-get install -y skopeo
             fi
-
             SRC="docker://${DOCKERHUB_REPO_APP}:${IMAGE_TAG}"
-            # Talk to Nexus locally (HTTP) so no SG change required
             DST="docker://127.0.0.1:5000/${NEXUS_REPO_APP}:${IMAGE_TAG}"
-
-            # Copy Hub -> Nexus; disable TLS on dest because Nexus is HTTP
-            skopeo copy \
-              --src-creds "${DOCKERHUB_USERNAME}:${DOCKERHUB_TOKEN}" \
-              --dest-creds "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
-              --src-tls-verify=true \
-              --dest-tls-verify=false \
-              "${SRC}" "${DST}"
-
-            # also tag :latest
-            skopeo copy \
-              --src-creds "${DOCKERHUB_USERNAME}:${DOCKERHUB_TOKEN}" \
-              --dest-creds "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
-              --src-tls-verify=true \
-              --dest-tls-verify=false \
-              "${SRC}" "docker://127.0.0.1:5000/${NEXUS_REPO_APP}:latest"
+            skopeo copy --src-creds "${DOCKERHUB_USERNAME}:${DOCKERHUB_TOKEN}" \
+                        --dest-creds "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
+                        --src-tls-verify=true --dest-tls-verify=false \
+                        "${SRC}" "${DST}"
+            skopeo copy --src-creds "${DOCKERHUB_USERNAME}:${DOCKERHUB_TOKEN}" \
+                        --dest-creds "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
+                        --src-tls-verify=true --dest-tls-verify=false \
+                        "${SRC}" "docker://127.0.0.1:5000/${NEXUS_REPO_APP}:latest"
 
   build-and-push-web:
     name: Build & push web image
     runs-on: ubuntu-latest
-    needs: [ setup ]
+    needs: [setup]
     env:
       IMAGE_TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
@@ -238,31 +226,21 @@ jobs:
           envs: IMAGE_TAG,DOCKERHUB_REPO_WEB,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,NEXUS_USERNAME,NEXUS_PASSWORD,NEXUS_REPO_WEB
           script: |
             set -euo pipefail
-            # Install skopeo if missing
             if ! command -v skopeo >/dev/null 2>&1; then
               sudo apt-get update -y
               sudo apt-get install -y skopeo
             fi
-
             SRC="docker://${DOCKERHUB_REPO_WEB}:${IMAGE_TAG}"
-            # Talk to Nexus locally (HTTP) so no SG change required
             DST="docker://127.0.0.1:5000/${NEXUS_REPO_WEB}:${IMAGE_TAG}"
+            skopeo copy --src-creds "${DOCKERHUB_USERNAME}:${DOCKERHUB_TOKEN}" \
+                        --dest-creds "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
+                        --src-tls-verify=true --dest-tls-verify=false \
+                        "${SRC}" "${DST}"
+            skopeo copy --src-creds "${DOCKERHUB_USERNAME}:${DOCKERHUB_TOKEN}" \
+                        --dest-creds "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
+                        --src-tls-verify=true --dest-tls-verify=false \
+                        "${SRC}" "docker://127.0.0.1:5000/${NEXUS_REPO_WEB}:latest"
 
-            # Copy Hub -> Nexus; disable TLS on dest because Nexus is HTTP
-            skopeo copy \
-              --src-creds "${DOCKERHUB_USERNAME}:${DOCKERHUB_TOKEN}" \
-              --dest-creds "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
-              --src-tls-verify=true \
-              --dest-tls-verify=false \
-              "${SRC}" "${DST}"
-
-            # also tag :latest
-            skopeo copy \
-              --src-creds "${DOCKERHUB_USERNAME}:${DOCKERHUB_TOKEN}" \
-              --dest-creds "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
-              --src-tls-verify=true \
-              --dest-tls-verify=false \
-              "${SRC}" "docker://127.0.0.1:5000/${NEXUS_REPO_WEB}:latest"
   snyk-release:
     name: Snyk scan of images
     runs-on: ubuntu-latest
@@ -342,6 +320,11 @@ jobs:
       NEXUS_REPO_APP: ${{ secrets.NEXUS_REPO_APP }}
       NEXUS_REPO_WEB: ${{ secrets.NEXUS_REPO_WEB }}
       DEPLOY_REGISTRY: ${{ secrets.DEPLOY_REGISTRY }}
+      FLASK_PORT: ${{ secrets.FLASK_PORT }}
+      DB_NAME: ${{ secrets.DB_NAME }}
+      DB_USER: ${{ secrets.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_PORT: ${{ secrets.DB_PORT }}
     steps:
       - uses: actions/checkout@v4
 
@@ -383,12 +366,10 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         env:
           TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
-          # Hub creds and repos
           DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
           DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
           DH_REPO_APP: ${{ secrets.DOCKERHUB_REPO_APP }}
           DH_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}
-          # Nexus (if you ever switch DEPLOY_REGISTRY to 'nexus')
           NEXUS_DOMAIN: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}
           NEXUS_USER: ${{ secrets.NEXUS_USERNAME }}
           NEXUS_PASS: ${{ secrets.NEXUS_PASSWORD }}
@@ -404,7 +385,7 @@ jobs:
           host: ${{ secrets.EC2_HOST }}
           username: ${{ secrets.EC2_USER }}
           key: ${{ secrets.EC2_SSH_KEY }}
-          envs: TAG,DH_USER,DH_TOKEN,DH_REPO_APP,DH_REPO_WEB,NEXUS_DOMAIN,NEXUS_USER,NEXUS_PASS,NEXUS_REPO_APP,NEXUS_REPO_WEB,DEPLOY_REGISTRY,DB_NAME,DB_USER,DB_PASSWORD,DB_PORT
+          envs: TAG,DH_USER,DH_TOKEN,DH_REPO_APP,DH_REPO_WEB,NEXUS_DOMAIN,NEXUS_USER,NEXUS_PASS,NEXUS_REPO_APP,NEXUS_REPO_WEB,DEPLOY_REGISTRY,DB_NAME,DB_USER,DB_PASSWORD,DB_PORT,FLASK_PORT
           script: |
             set -eo pipefail
             sudo mkdir -p /srv/supermario/content/images
@@ -418,7 +399,6 @@ jobs:
 
             REG="${DEPLOY_REGISTRY:-hub}"
             if [ "$REG" = "nexus" ]; then
-              # Talk to Nexus over localhost HTTP (no public 5000, no TLS)
               NEXUS_LOCAL="127.0.0.1:5000"
               echo "${NEXUS_PASS}" | sudo docker login "${NEXUS_LOCAL}" -u "${NEXUS_USER}" --password-stdin
               IMAGE_REPO_APP="${NEXUS_LOCAL}/${NEXUS_REPO_APP}"
@@ -428,7 +408,7 @@ jobs:
               IMAGE_REPO_APP="${DH_REPO_APP}"
               IMAGE_REPO_WEB="${DH_REPO_WEB}"
             fi
-            
+
             # Write or update .env for compose (app, web, db)
             {
               echo "IMAGE_REPO_APP=${IMAGE_REPO_APP}"
@@ -438,13 +418,17 @@ jobs:
               echo "DB_USER=${DB_USER}"
               echo "DB_PASSWORD=${DB_PASSWORD}"
               echo "DB_PORT=${DB_PORT:-5432}"
+              echo "FLASK_PORT=${FLASK_PORT:-8000}"
             } | sudo tee .env >/dev/null
 
             echo "Pulling ${IMAGE_REPO_APP}:${TAG} and ${IMAGE_REPO_WEB}:${TAG}…"
             sudo docker pull "${IMAGE_REPO_APP}:${TAG}"
             sudo docker pull "${IMAGE_REPO_WEB}:${TAG}"
 
-            # Deploy (now also brings up Postgres)
+            # Ensure external DB volume exists (Option A)
+            sudo docker volume create supermario_db_data >/dev/null
+
+            # Deploy (also brings up Postgres)
             sudo docker compose -f compose.yml pull
             sudo docker compose -f compose.yml up -d --no-build
             sudo docker image prune -f
