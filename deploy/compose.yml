@@ -37,3 +37,5 @@ services:
 
 volumes:
   supermario_db_data:
+    name: supermario_db_data           # <— fixed global name
+    external: true                     # <— don’t let Compose delete/recreate it
