@@ -287,7 +287,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Download artifacts into separate subfolders
+      # ⬇️ Download artifacts into separate subfolders
       - name: Download Allure artifacts (unit)
         uses: actions/download-artifact@v4
         with:
@@ -306,7 +306,7 @@ jobs:
           name: allure-results-e2e
           path: results/e2e
 
-      # Merge all result files into one folder
+      # ⬇️ Merge all result files into one folder
       - name: Merge Allure result files
         shell: bash
         run: |
@@ -328,11 +328,18 @@ jobs:
           echo "Total files in merged/: $(find merged -type f | wc -l)"
           test "$(find merged -type f | wc -l)" -gt 0
 
-      # Build the Allure HTML from the merged folder
+      - name: Debug counts
+        run: |
+          echo "UNIT:" $(find results/unit -type f | wc -l)
+          echo "DB:  " $(find results/db   -type f | wc -l)
+          echo "E2E: " $(find results/e2e  -type f | wc -l)
+          echo "MERGED:" $(find merged -type f | wc -l)
+
+      # ⬇️ Build the Allure HTML from the merged folder
       - name: Generate Allure report
         uses: simple-elf/allure-report-action@v1.7
         with:
-          allure_results: merged
+          allure_results: merged          # <— use the merged folder
           allure_report: public/allure/latest
           keep_reports: 10
           gh_pages: gh-pages
@@ -342,7 +349,7 @@ jobs:
           github_repo: ${{ github.repository }}
           github_repo_owner: ${{ github.repository_owner }}
 
-      # Create a root redirect and fix perms (the action runs in a container)
+      # ⬇️ Create a root redirect and fix perms (the action runs in a container)
       - name: Add root index + fix perms
         shell: bash
         run: |

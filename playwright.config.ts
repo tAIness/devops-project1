@@ -27,10 +27,9 @@ export default defineConfig({
     // { name: 'webkit',  use: { ...devices['Desktop Safari'] } },
   ],
   webServer: {
-  command: 'npx http-server ./web -p 8081 -c-1',  // or your real start command
+  command: 'echo CI server is external',
   url: 'http://127.0.0.1:8081',
-  timeout: 120_000,
-  reuseExistingServer: !process.env.CI,
-},
+  reuseExistingServer: true,   // <— crucial to avoid the port-in-use error
+}
 });
 
