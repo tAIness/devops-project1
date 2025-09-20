@@ -432,7 +432,7 @@ jobs:
             sudo docker compose -f compose.yml pull
             sudo docker compose -f compose.yml up -d --no-build
             sudo docker image prune -f
-            
+
   notify-slack:
     if: always()
     needs: [ autotag, setup, build-and-push-app, build-and-push-web, snyk-release, deploy-ec2 ]
