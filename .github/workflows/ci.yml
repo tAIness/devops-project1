@@ -376,3 +376,25 @@ jobs:
       - id: deployment
         uses: actions/deploy-pages@v4
 
+  notify-slack:
+    if: always()
+    needs: [ lint, unit-tests, db-tests, e2e, build, snyk-pr, allure-report, deploy-pages ]
+    uses: tAIness/devops-ci-lib/.github/workflows/slack-notify.yml@main   # or @slack-notify-v1
+    secrets: inherit
+    with:
+      title: "CI (PR checks): ${{ github.head_ref || github.ref_name }}"
+      status: ${{ (
+        needs.lint.result == 'failure' ||
+        needs['unit-tests'].result == 'failure' ||
+        needs['db-tests'].result == 'failure' ||
+        needs.e2e.result == 'failure' ||
+        needs.build.result == 'failure' ||
+        needs['snyk-pr'].result == 'failure' ||
+        needs['allure-report'].result == 'failure' ||
+        needs['deploy-pages'].result == 'failure'
+        ) && 'failure' || 'success' }}
+      pages_url: "https://tainess.github.io/devops-project1/allure/latest/"
+      only_on: "always"   # set to "failure" to notify only on failures
+      run_url: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      message: "PR #${{ github.event.pull_request.number || 'n/a' }} by @${{ github.actor }}"
+
