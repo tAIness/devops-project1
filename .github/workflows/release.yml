@@ -432,3 +432,20 @@ jobs:
             sudo docker compose -f compose.yml pull
             sudo docker compose -f compose.yml up -d --no-build
             sudo docker image prune -f
+            
+  notify-slack:
+    if: always()
+    needs: [ autotag, setup, build-and-push-app, build-and-push-web, snyk-release, deploy-ec2 ]
+    uses: tAIness/devops-ci-lib/.github/workflows/slack-notify.yml@main
+    secrets: inherit
+    with:
+      title: "Release: ${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
+      status: ${{ (
+        needs['build-and-push-app'].result == 'failure' ||
+        needs['build-and-push-web'].result == 'failure' ||
+        needs['snyk-release'].result == 'failure' ||
+        needs['deploy-ec2'].result == 'failure'
+        ) && 'failure' || 'success' }}
+      only_on: "always"
+      run_url: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      message: "Actor: @${{ github.actor }} · Ref: ${{ github.ref_name }}"
