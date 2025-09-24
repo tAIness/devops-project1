@@ -242,8 +242,3 @@ docker compose -f compose.yml up -d
 - **Release failed at Snyk step**: open `snyk-*.json` artifacts to inspect the CVEs; use `security/ignores.txt` judiciously.
 - **Nexus mirror errors**: Ensure `skopeo` is installed on EC2 (the workflow installs it if missing) and that the Docker registry is reachable at `127.0.0.1:5000` on the host.
 
----
-
-## License
-
-MIT (or your choice). Update this section if needed.
