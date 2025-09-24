@@ -22,3 +22,4 @@ COPY game/             /usr/share/nginx/html/game/
 COPY leaderboard/      /usr/share/nginx/html/leaderboard/
 
 HEALTHCHECK --interval=10s --timeout=3s --retries=5 CMD curl -fsS http://localhost/ || exit 1
+
