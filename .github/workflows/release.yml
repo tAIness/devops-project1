@@ -208,6 +208,46 @@ jobs:
           sudo apt-get update -y
           sudo apt-get install -y skopeo
 
+  ensure-ec2:
+    name: Ensure EC2 is up & SSH reachable
+    runs-on: ubuntu-latest
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id:     ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region:            ${{ secrets.AWS_REGION }}
+
+      - name: Start instance if needed & wait for status checks
+        shell: bash
+        run: |
+          set -euo pipefail
+          IID="${{ secrets.EC2_INSTANCE_ID }}"
+          state=$(aws ec2 describe-instances --instance-ids "$IID" \
+                  --query 'Reservations[0].Instances[0].State.Name' --output text)
+          echo "Current state: $state"
+          if [[ "$state" != "running" ]]; then
+            aws ec2 start-instances --instance-ids "$IID" >/dev/null
+            aws ec2 wait instance-running --instance-ids "$IID"
+          fi
+          aws ec2 wait instance-status-ok --instance-ids "$IID"
+
+      - name: Wait for SSH (port 22)
+        shell: bash
+        run: |
+          set -euo pipefail
+          HOST="${{ secrets.EC2_HOST }}"
+          for i in {1..60}; do
+            if nc -z -w 3 "$HOST" 22; then
+              echo "SSH is reachable."
+              exit 0
+            fi
+            echo "Attempt $i/60: waiting for SSH on $HOST:22 ..."
+            sleep 5
+          done
+          echo "ERROR: SSH not reachable in time." >&2
+          exit 1
+
       - name: Mirror WEB to Nexus on EC2 (no public 5000 needed)
         uses: appleboy/ssh-action@v1.0.3
         env:
