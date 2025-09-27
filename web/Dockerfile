@@ -17,7 +17,7 @@ COPY nginx.conf /etc/nginx/nginx.conf
 COPY static/index.html /usr/share/nginx/html/index.html
 COPY static/css/       /usr/share/nginx/html/css/
 COPY assets/           /usr/share/nginx/html/assets/
-COPY web/images/       /usr/share/nginx/html/images/
+COPY images/           /usr/share/nginx/html/images/
 COPY game/             /usr/share/nginx/html/game/
 COPY leaderboard/      /usr/share/nginx/html/leaderboard/
 
