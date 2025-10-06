@@ -1,0 +1,17 @@
+{{- if .Values.project.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: AppProject
+metadata:
+  name: {{ .Values.project.name }}
+  namespace: argocd
+spec:
+  description: Project for Mario apps
+  destinations:
+{{ toYaml .Values.project.destinations | indent 4 }}
+  sourceRepos:
+{{ toYaml .Values.project.sourceRepos | indent 4 }}
+  clusterResourceWhitelist:
+{{ toYaml .Values.project.clusterResourceWhitelist | indent 4 }}
+  namespaceResourceWhitelist:
+{{ toYaml .Values.project.namespaceResourceWhitelist | indent 4 }}
+{{- end }}
