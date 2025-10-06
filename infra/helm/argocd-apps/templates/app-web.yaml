@@ -1,0 +1,28 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: web
+  namespace: argocd
+  annotations:
+    argocd.argoproj.io/sync-wave: "10"
+spec:
+  project: default
+  source:
+    repoURL: {{ .Values.global.repoURL | quote }}
+    targetRevision: {{ include "apps.targetRevision" . | quote }}
+    path: infra/helm/web
+    helm:
+      parameters:
+        # assumes the web chart uses .Values.image.tag
+        - name: image.tag
+          value: {{ include "apps.imageTag" . | quote }}
+  destination:
+    server: {{ .Values.destinations.clusterServer | quote }}
+    namespace: {{ .Values.destinations.webNamespace | quote }}
+  syncPolicy:
+    automated:
+      {{- if .Values.syncPolicy.automated }}{{/* on by default */}}{{ end }}
+      prune: {{ .Values.syncPolicy.prune }}
+      selfHeal: {{ .Values.syncPolicy.selfHeal }}
+    syncOptions:
+      - CreateNamespace={{ ternary "true" "false" .Values.syncPolicy.createNamespace }}

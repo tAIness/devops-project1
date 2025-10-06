@@ -1,0 +1,20 @@
+global:
+  repoURL: https://github.com/tAIness/devops-project1.git
+
+  # If set, overrides the default of using .Chart.AppVersion
+  # (e.g., set this to a tag like v1.2.3)
+  targetRevision: ""
+
+  # Optional: force the container image tag in child charts (expects child charts to use .Values.image.tag)
+  appImageTag: ""
+
+destinations:
+  clusterServer: https://kubernetes.default.svc
+  webNamespace: web
+  backendNamespace: backend
+
+syncPolicy:
+  automated: true
+  prune: true
+  selfHeal: true
+  createNamespace: true

@@ -2,16 +2,16 @@ apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: root-app
-  namespace: argocd
+  namespace: argocd-apps
 spec:
   project: default
   source:
     repoURL: https://github.com/tAIness/devops-project1.git
     targetRevision: HEAD
-    path: infra/k8s/argocd/apps
+    path: infra/k8s/argocd-apps/apps
   destination:
     server: https://kubernetes.default.svc
-    namespace: argocd
+    namespace: argocd-apps
   syncPolicy:
     automated:
       prune: true
