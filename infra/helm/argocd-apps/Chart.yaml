@@ -1,0 +1,8 @@
+apiVersion: v2
+name: argocd-apps
+description: App-of-apps for Argo CD
+type: application
+version: 0.1.0
+# IMPORTANT: this is the version your child apps will follow by default
+# Set this to your git release/tag in CI (e.g., v1.2.3)
+appVersion: "v0.1.0"
