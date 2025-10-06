@@ -1,0 +1,24 @@
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: argocd-apps
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: https://github.com/tAIness/devops-project1.git   # your repo
+    targetRevision: main                                      # prefer a fixed branch over HEAD
+    path: infra/helm/argocd-apps
+    helm:
+      values: |
+        global:
+          repoURL: https://github.com/tAIness/devops-project1.git
+          targetRevision: main
+          clusterServer: https://kubernetes.default.svc
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: argocd
+  syncPolicy:
+    automated:
+      prune: true
+      selfHeal: true
