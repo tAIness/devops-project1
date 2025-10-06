@@ -26,3 +26,10 @@ venv/
 #tests
 allure-results
 e2e/junit.xml
+
+# Ignore any TLS material anywhere under infra/k8s
+infra/k8s/**/tls/**
+infra/k8s/**/**/*.key
+infra/k8s/**/**/*.pem
+infra/k8s/**/**/*.p12
+infra/k8s/**/**/*.pfx

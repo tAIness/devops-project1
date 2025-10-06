@@ -1,0 +1,86 @@
+# web/nginx-pvc.yaml
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: nginx-html
+  namespace: mario-web
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 1Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mario
+  namespace: mario-web
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mario-web
+  template:
+    metadata:
+      labels:
+        app: mario-web
+    spec:
+      # Seed the PVC with the image's default /usr/share/nginx/html on first run
+      initContainers:
+        - name: seed-html
+          image: docker.io/itaef/supermario-front:v1.0.48
+          command: ["/bin/sh","-c"]
+          args:
+            - |
+              set -e
+              # copy only if target is empty (so we don't overwrite edits)
+              if [ -z "$(ls -A /workdir 2>/dev/null)" ]; then
+                cp -a /usr/share/nginx/html/* /workdir/
+              fi
+          volumeMounts:
+            - name: web-html
+              mountPath: /workdir
+      containers:
+        - name: nginx
+          image: docker.io/itaef/supermario-front:v1.0.48
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 80
+          # Probes
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 80
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          # Resources
+          resources:
+            requests:
+              cpu: 50m
+              memory: 64Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          # Mounts: PVC as docroot + nginx.conf from ConfigMap
+          volumeMounts:
+            - name: web-html
+              mountPath: /usr/share/nginx/html
+            - name: nginx-conf
+              mountPath: /etc/nginx/nginx.conf
+              subPath: nginx.conf
+      volumes:
+        - name: web-html
+          persistentVolumeClaim:
+            claimName: nginx-html
+        - name: nginx-conf
+          configMap:
+            name: web-nginx
+            items:
+              - key: nginx.conf
+                path: nginx.conf

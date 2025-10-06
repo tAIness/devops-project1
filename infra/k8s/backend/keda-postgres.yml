@@ -1,0 +1,36 @@
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: pg-auth
+  namespace: mario-backend
+spec:
+  secretTargetRef:
+    - parameter: connection
+      name: db-conn
+      key: url
+---
+apiVersion: keda.sh/v1alpha1
+kind: ScaledObject
+metadata:
+  name: app-scaled
+  namespace: mario-backend
+spec:
+  scaleTargetRef:
+    name: app
+  minReplicaCount: 1
+  maxReplicaCount: 5
+  pollingInterval: 15
+  cooldownPeriod: 60
+  triggers:
+    # DB-driven trigger
+    - type: postgresql
+      metadata:
+        query: "SELECT COUNT(*) FROM scores WHERE result IS NOT NULL;"
+        targetQueryValue: "10"
+      authenticationRef:
+        name: pg-auth
+    # CPU-driven trigger (same 50% you used before)
+    - type: cpu
+      metadata:
+        type: Utilization
+        value: "50"
