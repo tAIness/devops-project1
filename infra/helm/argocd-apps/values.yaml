@@ -1,20 +1,26 @@
 global:
   repoURL: https://github.com/tAIness/devops-project1.git
+  rootPath: infra/k8s
+  destinationNamespace: argocd
 
-  # If set, overrides the default of using .Chart.AppVersion
-  # (e.g., set this to a tag like v1.2.3)
-  targetRevision: ""
+project:
+  enabled: true
+  name: default
+  description: Default Argo CD project
+  destinations:
+    - namespace: "*"
+      server: https://kubernetes.default.svc
+  sourceRepos:
+    - "*"
+  clusterResourceWhitelist:
+    - group: "*"
+      kind: "*"
+  namespaceResourceBlacklist: []
 
-  # Optional: force the container image tag in child charts (expects child charts to use .Values.image.tag)
-  appImageTag: ""
-
-destinations:
-  clusterServer: https://kubernetes.default.svc
-  webNamespace: web
-  backendNamespace: backend
-
-syncPolicy:
-  automated: true
-  prune: true
-  selfHeal: true
-  createNamespace: true
+apps:
+  - name: web
+    path: web
+    targetRevision: ""     # empty => uses Chart.appVersion
+  - name: backend
+    path: backend
+    targetRevision: ""     # empty => uses Chart.appVersion
