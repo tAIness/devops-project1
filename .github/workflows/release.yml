@@ -96,8 +96,22 @@ jobs:
           sudo mv yq /usr/local/bin/yq
           yq --version
 
-      - name: Set Chart.appVersion
-        run: yq -i '.appVersion = strenv(TAG)' infra/helm/argocd/Chart.yaml
+      - name: Set Helm appVersion to TAG (all charts)
+        uses: mikefarah/yq@v4.44.3
+        env:
+          TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
+        with:
+          cmd: |
+            set -euo pipefail
+            shopt -s nullglob
+            charts=(infra/helm/**/Chart.yaml)
+            if [[ ${#charts[@]} -eq 0 ]]; then
+              echo "No Chart.yaml found under infra/helm"; exit 1
+            fi
+            for f in "${charts[@]}"; do
+              echo "Updating $f to appVersion=${TAG}"
+              yq -i '.appVersion = env(TAG)' "$f"
+            done
 
       - name: Commit & push change
         run: |
@@ -110,7 +124,7 @@ jobs:
             git commit -am "chore(helm): set appVersion to ${TAG}"
             git push origin HEAD:${GITHUB_REF_NAME}
           fi
-  
+
   build-and-push-app:
     name: Build & push app image
     runs-on: ubuntu-latest
