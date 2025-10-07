@@ -1,8 +1,6 @@
 apiVersion: v2
 name: argocd-apps
-description: App-of-apps for Argo CD
+description: Argo CD applications umbrella chart
 type: application
 version: 0.1.0
-# IMPORTANT: this is the version your child apps will follow by default
-# Set this to your git release/tag in CI (e.g., v1.2.3)
-appVersion: "v0.1.0"
+appVersion: "v0.0.0"   # CI will set this to tag (e.g., v1.2.3)
