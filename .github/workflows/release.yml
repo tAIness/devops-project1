@@ -101,16 +101,13 @@ jobs:
         env:
           TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
         with:
-          cmd: |
-            set -euo pipefail
-            shopt -s nullglob
-            charts=(infra/helm/**/Chart.yaml)
-            if [[ ${#charts[@]} -eq 0 ]]; then
-              echo "No Chart.yaml found under infra/helm"; exit 1
-            fi
-            for f in "${charts[@]}"; do
-              echo "Updating $f to appVersion=${TAG}"
-              yq -i '.appVersion = env(TAG)' "$f"
+          cmd: >
+            set -eu;
+            charts="$(find infra/helm -type f -name Chart.yaml)";
+            if [ -z "$charts" ]; then echo "No Chart.yaml found under infra/helm"; exit 1; fi;
+            for f in $charts; do
+              echo "Updating $f to appVersion=${TAG}";
+              yq -i '.appVersion = env(TAG)' "$f";
             done
 
       - name: Commit & push change
