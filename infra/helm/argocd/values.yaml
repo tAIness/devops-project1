@@ -1,75 +1,26 @@
 global:
-  repoURL: "https://github.com/tAIness/devops-project1.git"
-  targetRevision: "main"
-  clusterServer: "https://kubernetes.default.svc"
+  repoURL: https://github.com/tAIness/devops-project1.git
+  rootPath: infra/k8s
+  destinationNamespace: argocd
 
 project:
   enabled: true
-  name: mario
+  name: default
+  description: Default Argo CD project
   destinations:
-    - namespace: argocd
-      server: "{{ .Values.global.clusterServer }}"
-    - namespace: web
-      server: "{{ .Values.global.clusterServer }}"
-    - namespace: backend
-      server: "{{ .Values.global.clusterServer }}"
-    - namespace: monitoring
-      server: "{{ .Values.global.clusterServer }}"
+    - namespace: "*"
+      server: https://kubernetes.default.svc
   sourceRepos:
-    - "{{ .Values.global.repoURL }}"
+    - "*"
   clusterResourceWhitelist:
-    - group: '*'
-      kind: '*'
-  namespaceResourceWhitelist:
-    - group: '*'
-      kind: '*'
+    - group: "*"
+      kind: "*"
+  namespaceResourceBlacklist: []
 
-# Define your apps here. Each entry becomes an Argo CD Application.
 apps:
   - name: web
-    namespace: argocd
-    project: mario
-    path: infra/k8s/web
-    targetRevision: "{{ .Values.global.targetRevision }}"
-    destination:
-      namespace: web
-      server: "{{ .Values.global.clusterServer }}"
-    syncPolicy:
-      automated:
-        prune: true
-        selfHeal: true
-      syncOptions:
-        - CreateNamespace=true
-        - ApplyOutOfSyncOnly=true
-
+    path: web
+    targetRevision: ""     # empty => uses Chart.appVersion
   - name: backend
-    namespace: argocd
-    project: mario
-    path: infra/k8s/backend
-    targetRevision: "{{ .Values.global.targetRevision }}"
-    destination:
-      namespace: backend
-      server: "{{ .Values.global.clusterServer }}"
-    syncPolicy:
-      automated:
-        prune: true
-        selfHeal: true
-      syncOptions:
-        - CreateNamespace=true
-        - ApplyOutOfSyncOnly=true
-
-  - name: monitoring
-    namespace: argocd
-    project: mario
-    path: infra/k8s/monitoring
-    targetRevision: "{{ .Values.global.targetRevision }}"
-    destination:
-      namespace: monitoring
-      server: "{{ .Values.global.clusterServer }}"
-    syncPolicy:
-      automated:
-        prune: true
-        selfHeal: true
-      syncOptions:
-        - CreateNamespace=true
-        - ApplyOutOfSyncOnly=true
+    path: backend
+    targetRevision: ""     # empty => uses Chart.appVersion

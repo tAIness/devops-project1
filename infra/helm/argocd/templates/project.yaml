@@ -2,16 +2,16 @@
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
-  name: {{ .Values.project.name }}
-  namespace: argocd
+  name: {{ .Values.project.name | default "default" }}
+  namespace: {{ .Values.global.destinationNamespace | default "argocd" }}
 spec:
-  description: Project for Mario apps
+  description: {{ .Values.project.description | default "" | quote }}
   destinations:
-{{ toYaml .Values.project.destinations | indent 4 }}
+{{- toYaml (default (list (dict "namespace" "*" "server" "https://kubernetes.default.svc")) .Values.project.destinations) | nindent 4 }}
   sourceRepos:
-{{ toYaml .Values.project.sourceRepos | indent 4 }}
+{{- toYaml (default (list "*") .Values.project.sourceRepos) | nindent 4 }}
   clusterResourceWhitelist:
-{{ toYaml .Values.project.clusterResourceWhitelist | indent 4 }}
-  namespaceResourceWhitelist:
-{{ toYaml .Values.project.namespaceResourceWhitelist | indent 4 }}
+{{- toYaml (default (list (dict "group" "*" "kind" "*")) .Values.project.clusterResourceWhitelist) | nindent 4 }}
+  namespaceResourceBlacklist:
+{{- toYaml (default (list) .Values.project.namespaceResourceBlacklist) | nindent 4 }}
 {{- end }}

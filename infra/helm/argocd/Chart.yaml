@@ -1,6 +1,6 @@
 apiVersion: v2
 name: argocd-apps
-description: App-of-apps chart for Argo CD Applications & Projects
+description: Argo CD applications umbrella chart
 type: application
 version: 0.1.0
-appVersion: "1.0"
+appVersion: "v0.0.0"   # CI will set this to tag (e.g., v1.2.3)

@@ -1,29 +1,27 @@
-{{- range $app := .Values.apps }}
----
+{{- $repo := .Values.global.repoURL -}}
+{{- $root := .Values.global.rootPath | default "" -}}
+{{- $destNs := .Values.global.destinationNamespace | default "argocd" -}}
+
+{{- range .Values.apps }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: {{ $app.name }}
-  namespace: {{ default "argocd" $app.namespace }}
-  finalizers:
-    - resources-finalizer.argocd.argoproj.io
+  name: {{ .name }}
+  namespace: {{ $destNs }}
 spec:
-  project: {{ $app.project | default "default" }}
+  project: {{ $.Values.project.name | default "default" }}
   source:
-    repoURL: {{ default $.Values.global.repoURL $app.repoURL | quote }}
-    targetRevision: {{ default $.Values.global.targetRevision $app.targetRevision | quote }}
-    path: {{ $app.path | quote }}
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ (or .targetRevision $.Chart.AppVersion) | quote }}
+    path: {{ printf "%s/%s" $root .path | trimPrefix "/" | quote }}
   destination:
-    namespace: {{ $app.destination.namespace | quote }}
-    server: {{ $app.destination.server | quote }}
+    server: https://kubernetes.default.svc
+    namespace: {{ $destNs }}
   syncPolicy:
-{{- if $app.syncPolicy }}
-{{ toYaml $app.syncPolicy | indent 4 }}
-{{- else }}
     automated:
       prune: true
       selfHeal: true
     syncOptions:
       - CreateNamespace=true
-{{- end }}
+---
 {{- end }}
