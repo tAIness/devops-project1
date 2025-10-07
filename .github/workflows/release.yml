@@ -68,6 +68,49 @@ jobs:
             echo "IMAGE_TAG=${{ github.sha }}" >> "$GITHUB_OUTPUT"
           fi
 
+  bump-helm-appversion:
+    name: Bump Helm appVersion
+    runs-on: ubuntu-latest
+    needs: [setup]
+    env:
+      TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+
+      - name: Install yq (static binary)
+        run: |
+          set -euo pipefail
+          YQ_VERSION=v4.44.3
+          OS=$(uname) 
+          ARCH=$(uname -m)
+          case "$ARCH" in
+            x86_64) ARCH=amd64 ;;
+            aarch64|arm64) ARCH=arm64 ;;
+          esac
+          curl -L "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_${OS}_${ARCH}" -o yq
+          chmod +x yq
+          sudo mv yq /usr/local/bin/yq
+          yq --version
+
+      - name: Set Chart.appVersion
+        run: yq -i '.appVersion = strenv(TAG)' infra/helm/argocd/Chart.yaml
+
+      - name: Commit & push change
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "No changes to commit."
+          else
+            git commit -am "chore(helm): set appVersion to ${TAG}"
+            git push origin HEAD:${GITHUB_REF_NAME}
+          fi
+  
   build-and-push-app:
     name: Build & push app image
     runs-on: ubuntu-latest
