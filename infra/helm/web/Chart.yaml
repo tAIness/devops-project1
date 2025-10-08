@@ -2,5 +2,4 @@ apiVersion: v2
 name: web
 type: application
 version: 0.1.0
-# CI will overwrite this to your Git tag (e.g. v1.0.60)
-appVersion: "v1.0.62"
+appVersion: "v0.0.0"   # ← CI will bump this to your release tag
