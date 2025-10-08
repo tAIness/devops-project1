@@ -1,3 +1,12 @@
+apiVersion: v1
+kind: Secret
+metadata:
+  name: db-conn
+  namespace: mario-backend
+type: Opaque
+stringData:
+  url: postgresql://superuser:superpass@db.mario-backend.svc.cluster.local:5432/supermario
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -7,16 +16,16 @@ spec:
   replicas: 1
   selector:
     matchLabels:
-      app: mario-app # ← keep existing immutable selector
+      app: mario-app            # ← keep existing immutable selector
   template:
     metadata:
       labels:
-        app: mario-app # ← must match selector
+        app: mario-app          # ← must match selector
     spec:
       initContainers:
         - name: wait-for-db
           image: postgres:15
-          command: ["/bin/sh", "-c"]
+          command: ["/bin/sh","-c"]
           args:
             - |
               set -eu
@@ -82,9 +91,10 @@ spec:
               memory: 512Mi
           securityContext:
             runAsNonRoot: true
-            runAsUser: 1000 # numeric UID to satisfy runAsNonRoot
+            runAsUser: 1000       # numeric UID to satisfy runAsNonRoot
             runAsGroup: 1000
             allowPrivilegeEscalation: false
+
 ---
 apiVersion: v1
 kind: Service
@@ -93,8 +103,9 @@ metadata:
   namespace: mario-backend
 spec:
   selector:
-    app: mario-app # ← match the pod label above
+    app: mario-app          # ← match the pod label above
   ports:
     - name: http
       port: 8000
       targetPort: 8000
+
