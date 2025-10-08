@@ -1,6 +1,6 @@
 image:
   repository: docker.io/itaef/supermario-service
-  tag: ""                  # if empty, chart uses .Chart.AppVersion
+  tag: ""                    # ← empty means “use .Chart.AppVersion”
   pullPolicy: IfNotPresent
 
 service:
@@ -10,8 +10,28 @@ ingress:
   enabled: true
   className: nginx
   host: api.mario.local
-  paths:
-    - path: /health
-      pathType: Prefix
-    - path: /api
-      pathType: Prefix
+  # keep /health as-is; rewrite /api/* → /* for the app
+  useRegex: true
+  rewriteTarget: "/$2"
+
+secrets:
+  # prevent Argo “RepeatedResourceWarning” by default
+  createDbConn: false
+  createDbCreds: false
+  dbConn:
+    url: ""                 # set only if createDbConn=true
+  dbCreds:
+    POSTGRES_DB: ""
+    POSTGRES_USER: ""
+    POSTGRES_PASSWORD: ""
+
+autoscaling:
+  mode: none                # one of: none | hpa | keda
+  hpa:
+    minReplicas: 1
+    maxReplicas: 3
+    targetCPUUtilizationPercentage: 80
+  keda:
+    minReplicaCount: 1
+    maxReplicaCount: 3
+    # add your KEDA triggers here

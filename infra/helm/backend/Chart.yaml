@@ -1,5 +1,6 @@
 apiVersion: v2
 name: backend
+description: Mario backend
 type: application
 version: 0.1.0
-appVersion: "v1.0.61" # CI will overwrite this to your release tag
+appVersion: "v0.0.0"   # ← CI will bump this to your release tag

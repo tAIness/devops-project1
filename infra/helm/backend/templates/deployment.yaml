@@ -2,7 +2,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: app
-  namespace: mario-backend
+  labels: { app: mario-app }
 spec:
   replicas: 1
   selector:
@@ -19,12 +19,9 @@ spec:
             - |
               set -eu
               HOST="db.mario-backend.svc.cluster.local"
-              echo "Waiting for Postgres at ${HOST}:5432 ..."
               until pg_isready -h "$HOST" -p 5432 -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do
-                echo "postgres not ready yet, retrying..."
-                sleep 2
+                echo "postgres not ready yet..."; sleep 2
               done
-              echo "Postgres is ready."
           env:
             - name: POSTGRES_USER
               valueFrom: { secretKeyRef: { name: db-secrets, key: POSTGRES_USER } }
@@ -34,24 +31,22 @@ spec:
         - name: app
           image: "{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          ports: [{ name: http, containerPort: 8000 }]
+          ports: [{ name: http, containerPort: {{ .Values.service.port }} }]
           env:
             - name: DATABASE_URL
               valueFrom: { secretKeyRef: { name: db-conn, key: url } }
             - name: PORT
-              value: "8000"
-            - name: GUNICORN_WORKERS
-              value: "2"
-            - name: GUNICORN_TIMEOUT
-              value: "30"
-          readinessProbe: { httpGet: { path: /health, port: 8000 }, initialDelaySeconds: 5, periodSeconds: 5 }
-          livenessProbe:  { httpGet: { path: /health, port: 8000 }, initialDelaySeconds: 20, periodSeconds: 10 }
----
-apiVersion: v1
-kind: Service
-metadata:
-  name: app-svc
-  namespace: mario-backend
-spec:
-  selector: { app: mario-app }
-  ports: [{ name: http, port: {{ .Values.service.port }}, targetPort: 8000 }]
+              value: "{{ .Values.service.port }}"
+          readinessProbe:
+            httpGet: { path: /health, port: {{ .Values.service.port }} }
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: { path: /health, port: {{ .Values.service.port }} }
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false

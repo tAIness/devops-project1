@@ -3,21 +3,30 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: api
-  namespace: mario-backend
   annotations:
-    kubernetes.io/ingress.class: "{{ .Values.ingress.className }}"
+    kubernetes.io/ingress.class: nginx
+    {{- if .Values.ingress.useRegex }}
+    nginx.ingress.kubernetes.io/use-regex: "true"
+    nginx.ingress.kubernetes.io/rewrite-target: "{{ .Values.ingress.rewriteTarget }}"
+    {{- end }}
 spec:
-  ingressClassName: "{{ .Values.ingress.className }}"
+  ingressClassName: nginx
   rules:
-  - host: {{ .Values.ingress.host }}
-    http:
-      paths:
-      {{- range .Values.ingress.paths }}
-      - path: {{ .path }}
-        pathType: {{ .pathType }}
-        backend:
-          service:
-            name: app-svc
-            port: { number: {{ $.Values.service.port }} }
-      {{- end }}
+    - host: {{ .Values.ingress.host }}
+      http:
+        paths:
+          # rewrite /api(/|$)(.*) -> /$2  (so /api/leaderboard -> /leaderboard)
+          - path: /api(/|$)(.*)
+            pathType: Prefix
+            backend:
+              service:
+                name: app-svc
+                port: { number: {{ .Values.service.port }} }
+          # health untouched
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: app-svc
+                port: { number: {{ .Values.service.port }} }
 {{- end }}
