@@ -1,40 +1,19 @@
 global:
   repoURL: https://github.com/tAIness/devops-project1.git
+  rootPath: infra
   destinationNamespace: argocd
-  rootPath: ""
 
 project:
   enabled: false
-  name: default
 
 apps:
-  - name: backend
-    path: infra/helm/backend
-    destinationNamespace: mario-backend
-    helm:
-      values:
-        image:
-          repository: docker.io/itaef/supermario-service
-          tag: ""   # empty → chart uses .Chart.AppVersion
-        ingress:
-          enabled: true
-          host: api.mario.local
-          useRegex: true
-          rewriteTarget: "/$2"
-        autoscaling:
-          mode: none              # avoid KEDA/HPA conflict
-        secrets:
-          createDbConn: false
-          createDbCreds: false
-
-  - name: web
-    path: infra/helm/web
-    destinationNamespace: mario-web
-    helm:
-      values:
-        image:
-          repository: docker.io/itaef/supermario-web
-          tag: ""
-        ingress:
-          enabled: true
-          host: web.mario.local
+  web:
+    enabled: true
+    name: web
+    path: helm/web
+    targetRevision: ""
+  backend:
+    enabled: true
+    name: backend
+    path: helm/backend
+    targetRevision: ""
