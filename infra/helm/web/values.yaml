@@ -1,0 +1,19 @@
+image:
+  repository: docker.io/itaef/supermario-web   # ← change to your real repo
+  tag: ""          # if empty, chart uses .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+service:
+  port: 80
+
+ingress:
+  enabled: true
+  className: nginx
+  host: web.mario.local
+  path: /
+  pathType: Prefix
+
+env: {}            # e.g. { BASE_API: "http://api.mario.local" }
+resources:
+  requests: { cpu: 50m, memory: 64Mi }
+  limits:   { cpu: "1",  memory: 256Mi }

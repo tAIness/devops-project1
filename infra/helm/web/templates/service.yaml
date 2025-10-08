@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: web-svc
+  namespace: mario-web
+spec:
+  selector: { app: mario-web }
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: 80

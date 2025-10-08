@@ -15,6 +15,11 @@ try:
 except Exception as e:
     app.logger.warning("init_db failed (will retry on next request): %s", e)
 
+@app.get("/api")
+def api_index():
+    return jsonify({
+        "endpoints": ["/api/leaderboard", "/api/score (POST)"]
+    }), 200
 
 @app.get("/health")
 def health():

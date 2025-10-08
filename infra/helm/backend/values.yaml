@@ -1,0 +1,17 @@
+image:
+  repository: docker.io/itaef/supermario-service
+  tag: ""                  # if empty, chart uses .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
+service:
+  port: 8000
+
+ingress:
+  enabled: true
+  className: nginx
+  host: api.mario.local
+  paths:
+    - path: /health
+      pathType: Prefix
+    - path: /api
+      pathType: Prefix

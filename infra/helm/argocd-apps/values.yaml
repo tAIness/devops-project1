@@ -1,26 +1,15 @@
 global:
   repoURL: https://github.com/tAIness/devops-project1.git
-  rootPath: infra/k8s
-  destinationNamespace: argocd
-
-project:
-  enabled: true
-  name: default
-  description: Default Argo CD project
-  destinations:
-    - namespace: "*"
-      server: https://kubernetes.default.svc
-  sourceRepos:
-    - "*"
-  clusterResourceWhitelist:
-    - group: "*"
-      kind: "*"
-  namespaceResourceBlacklist: []
 
 apps:
-  - name: web
-    path: web
-    targetRevision: ""     # empty => uses Chart.appVersion
-  - name: backend
-    path: backend
-    targetRevision: ""     # empty => uses Chart.appVersion
+  backend:
+    enabled: true
+    namespace: mario-backend
+    chart: infra/helm/backend
+    values: {}          # optional chart values overrides
+  web:
+    enabled: true
+    namespace: mario-web
+    chart: infra/helm/web
+    values: { }   # optional overrides
+

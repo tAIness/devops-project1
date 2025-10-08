@@ -1,0 +1,22 @@
+{{- if .Values.apps.web.enabled }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: web
+  namespace: argocd
+spec:
+  project: default
+  source:
+    repoURL: {{ .Values.global.repoURL }}
+    targetRevision: {{ .Chart.AppVersion }}      # ← same Git tag as images
+    path: {{ .Values.apps.web.chart }}
+    helm:
+      values: |
+{{ toYaml .Values.apps.web.values | indent 8 }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ .Values.apps.web.namespace }}
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [ CreateNamespace=true ]
+{{- end }}
