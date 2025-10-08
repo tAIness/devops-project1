@@ -2,4 +2,4 @@ apiVersion: v2
 name: argocd-apps
 type: application
 version: 0.1.0
-appVersion: "v1.0.61" # CI overwrites this to vX.Y.Z
+appVersion: "v1.0.62" # CI overwrites this to vX.Y.Z
