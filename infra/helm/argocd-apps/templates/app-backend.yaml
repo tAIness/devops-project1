@@ -1,4 +1,4 @@
-{{- if .Values.apps.backend.enabled }}
+{{- if .Values._renderAppBackend }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:

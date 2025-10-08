@@ -8,11 +8,8 @@ service:
 
 ingress:
   enabled: true
-  className: nginx
   host: api.mario.local
-  # keep /health as-is; rewrite /api/* → /* for the app
-  useRegex: true
-  rewriteTarget: "/$2"
+  useRegex: false
 
 secrets:
   # prevent Argo “RepeatedResourceWarning” by default

@@ -1,4 +1,4 @@
-{{- if .Values.apps.web.enabled }}
+{{- if .Values._renderAppWeb }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
