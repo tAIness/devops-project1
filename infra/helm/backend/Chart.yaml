@@ -2,4 +2,4 @@ apiVersion: v2
 name: backend
 type: application
 version: 0.1.0
-appVersion: "v0.0.0"   # CI will overwrite this to your release tag
+appVersion: "v1.0.61" # CI will overwrite this to your release tag
