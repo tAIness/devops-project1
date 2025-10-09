@@ -3,28 +3,20 @@ apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: web
-  labels: { app: mario-web }
-  {{- with .Values.ingress.annotations }}
+  namespace: {{ .Release.Namespace }}
   annotations:
-{{ toYaml . | nindent 4 }}
-  {{- end }}
+    kubernetes.io/ingress.class: {{ .Values.ingress.ingressClassName | default "nginx" | quote }}
 spec:
-  {{- with .Values.ingress.className }}
-  ingressClassName: {{ . }}
-  {{- end }}
+  ingressClassName: {{ .Values.ingress.ingressClassName | default "nginx" | quote }}
   rules:
-  - host: {{ .Values.ingress.host | quote }}
+  - host: {{ required "ingress.host is required" .Values.ingress.host | quote }}
     http:
       paths:
-      {{- $svcName := (default "web-svc" .Values.service.name) -}}
-      {{- $svcPort := (default 80 .Values.service.port) -}}
-      {{- range .Values.ingress.paths }}
-      - path: {{ .path | default "/" }}
-        pathType: {{ .pathType | default "Prefix" }}
+      - path: {{ .Values.ingress.path | default "/" | quote }}
+        pathType: Prefix
         backend:
           service:
-            name: {{ $svcName }}
+            name: {{ .Values.service.name | default "web-svc" | quote }}
             port:
-              number: {{ .servicePort | default $svcPort }}
-      {{- end }}
+              number: {{ .Values.service.port | default 80 }}
 {{- end }}

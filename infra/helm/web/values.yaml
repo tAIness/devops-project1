@@ -1,9 +1,10 @@
 image:
   repository: docker.io/itaef/supermario-web
-  tag: ""               # empty → Helm uses .Chart.AppVersion
+  tag: ""                    # empty → uses .Chart.AppVersion
   pullPolicy: IfNotPresent
 
 service:
+  name: web-svc
   port: 80
 
 # optional extra env for the container
@@ -23,5 +24,5 @@ replicas: 1
 ingress:
   enabled: true
   host: web.mario.local
-  ingressClassName: nginx
   path: /
+  ingressClassName: nginx
