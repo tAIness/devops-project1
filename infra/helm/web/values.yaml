@@ -1,19 +1,22 @@
 image:
   repository: docker.io/itaef/supermario-web
-  tag: ""                 # empty -> use .Chart.AppVersion
+  tag: ""                  # use .Chart.AppVersion
   pullPolicy: IfNotPresent
 
 service:
+  name: web-svc
   port: 80
 
 ingress:
   enabled: true
   host: web.mario.local
+  className: nginx         # <- valid value or delete this key to omit
+  annotations: {}
+  paths:
+    - path: /              # <- can add more entries if you need
+      pathType: Prefix     # <- REQUIRED by k8s
+      servicePort: 80
 
 resources:
-  requests:
-    cpu: 100m
-    memory: 128Mi
-  limits:
-    cpu: 500m
-    memory: 256Mi
+  requests: { cpu: 100m, memory: 128Mi }
+  limits:   { cpu: 500m, memory: 256Mi }
