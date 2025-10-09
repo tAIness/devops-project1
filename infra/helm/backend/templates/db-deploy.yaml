@@ -1,0 +1,58 @@
+{{- $db := (get .Values "db") | default (dict) -}}
+{{- if (get $db "enabled" | default false) }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: db
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: mario-db
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: mario-db
+  template:
+    metadata:
+      labels:
+        app: mario-db
+    spec:
+      # postgres:15 runs as UID/GID 999
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 999
+        fsGroup: 999
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: postgres
+          image: {{ .Values.db.image | default "postgres:15" }}
+          ports:
+            - containerPort: 5432
+          envFrom:
+            - secretRef:
+                name: {{ .Values.db.secrets.credsName | default "db-secrets" }}
+          readinessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 5
+            periodSeconds: 5
+          livenessProbe:
+            exec:
+              command: ["sh", "-c", "pg_isready -U \"$POSTGRES_USER\" -d \"$POSTGRES_DB\""]
+            initialDelaySeconds: 20
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: "1"
+              memory: 512Mi
+          volumeMounts:
+            - name: data
+              mountPath: /var/lib/postgresql/data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: pg-data
+{{- end }}

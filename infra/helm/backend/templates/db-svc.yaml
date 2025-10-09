@@ -1,0 +1,17 @@
+{{- $db := (get .Values "db") | default (dict) -}}
+{{- if (get $db "enabled" | default false) }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ .Values.db.service.name | default "db" }}
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: mario-db
+spec:
+  selector:
+    app: mario-db
+  ports:
+    - name: pg
+      port: {{ .Values.db.service.port | default 5432 }}
+      targetPort: 5432
+{{- end }}

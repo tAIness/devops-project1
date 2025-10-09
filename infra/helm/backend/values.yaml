@@ -32,3 +32,14 @@ autoscaling:
     minReplicaCount: 1
     maxReplicaCount: 3
     # add your KEDA triggers here
+
+db:
+  enabled: true          # set true if you want the chart to provision Postgres
+  image: postgres:15
+  storage: 1Gi
+  service:
+    name: db
+    port: 5432
+  secrets:
+    credsName: db-secrets   # Secret with POSTGRES_DB/USER/PASSWORD
+

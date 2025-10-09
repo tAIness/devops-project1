@@ -1,0 +1,15 @@
+{{- $db := (get .Values "db") | default (dict) -}}
+{{- if (get $db "enabled" | default false) }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: pg-data
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: mario-db
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: {{ .Values.db.storage | default "1Gi" }}
+{{- end }}
