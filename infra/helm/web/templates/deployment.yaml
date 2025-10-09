@@ -2,35 +2,52 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: web
-  namespace: mario-web
+  namespace: {{ .Release.Namespace }}
+  labels:
+    app: mario-web
 spec:
-  replicas: 1
+  replicas: {{ .Values.replicas | default 1 }}
   selector:
-    matchLabels: { app: mario-web }
+    matchLabels:
+      app: mario-web
   template:
     metadata:
-      labels: { app: mario-web }
+      labels:
+        app: mario-web
     spec:
       containers:
         - name: web
-          image: "{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          ports: [{ containerPort: 80, name: http }]
-          env:
-            {{- range $k, $v := .Values.env }}
-            - name: {{ $k }}
-              value: "{{ $v }}"
-            {{- end }}
-          readinessProbe:
-            httpGet: { path: "/", port: 80 }
-            initialDelaySeconds: 5
-            periodSeconds: 5
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.image.pullPolicy | default "IfNotPresent" }}
+          ports:
+            - containerPort: {{ .Values.service.port | default 80 }}
+
           livenessProbe:
-            httpGet: { path: "/", port: 80 }
-            initialDelaySeconds: 20
+            httpGet:
+              path: /
+              port: {{ .Values.service.port | default 80 }}
+            initialDelaySeconds: 5
             periodSeconds: 10
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+
+          readinessProbe:
+            httpGet:
+              path: /
+              port: {{ .Values.service.port | default 80 }}
+            initialDelaySeconds: 3
+            periodSeconds: 5
+            timeoutSeconds: 1
+            successThreshold: 1
+            failureThreshold: 3
+
+          {{- with .Values.env }}
+          env:
+{{ toYaml . | nindent 12 }}
+          {{- end }}
+
+          {{- with .Values.resources }}
           resources:
-          {{- toYaml (default (dict
-                "requests" (dict "cpu" "100m"  "memory" "128Mi")
-                "limits"   (dict "cpu" "500m" "memory" "256Mi"))
-                .Values.resources) | nindent 10 }}
+{{ toYaml . | nindent 12 }}
+          {{- end }}

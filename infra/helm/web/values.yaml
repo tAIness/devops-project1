@@ -1,22 +1,27 @@
 image:
   repository: docker.io/itaef/supermario-web
-  tag: ""                  # use .Chart.AppVersion
+  tag: ""               # empty → Helm uses .Chart.AppVersion
   pullPolicy: IfNotPresent
 
 service:
-  name: web-svc
   port: 80
+
+# optional extra env for the container
+env: []
+
+# resources live under a single resources: block
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
+
+replicas: 1
 
 ingress:
   enabled: true
   host: web.mario.local
-  className: nginx         # <- valid value or delete this key to omit
-  annotations: {}
-  paths:
-    - path: /              # <- can add more entries if you need
-      pathType: Prefix     # <- REQUIRED by k8s
-      servicePort: 80
-
-resources:
-  requests: { cpu: 100m, memory: 128Mi }
-  limits:   { cpu: 500m, memory: 256Mi }
+  ingressClassName: nginx
+  path: /
