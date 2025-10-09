@@ -30,9 +30,7 @@ spec:
             initialDelaySeconds: 20
             periodSeconds: 10
           resources:
-            requests:
-              cpu: {{ .Values.resources.requests.cpu }}
-              memory: {{ .Values.resources.requests.memory }}
-            limits:
-              cpu: {{ .Values.resources.limits.cpu }}
-              memory: {{ .Values.resources.limits.memory }}
+          {{- toYaml (default (dict
+                "requests" (dict "cpu" "100m"  "memory" "128Mi")
+                "limits"   (dict "cpu" "500m" "memory" "256Mi"))
+                .Values.resources) | nindent 10 }}

@@ -1,9 +1,19 @@
 image:
   repository: docker.io/itaef/supermario-web
-  tag: ""  # default to .Chart.AppVersion
+  tag: ""                 # empty -> use .Chart.AppVersion
+  pullPolicy: IfNotPresent
+
 service:
   port: 80
+
 ingress:
   enabled: true
-  className: nginx
   host: web.mario.local
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 128Mi
+  limits:
+    cpu: 500m
+    memory: 256Mi
