@@ -1,19 +1,25 @@
 global:
+  argoNamespace: argocd          # where Application CRs live
   repoURL: https://github.com/tAIness/devops-project1.git
-  rootPath: infra
-  destinationNamespace: argocd
-
+  rootPath: ""                   # repo root unless you’re nesting
 project:
   enabled: true
+  name: default
 
 apps:
-  web:
-    enabled: true
-    name: web
-    path: helm/web
-    targetRevision: ""
-  backend:
-    enabled: true
-    name: backend
-    path: helm/backend
-    targetRevision: ""
+  - name: backend
+    path: infra/helm/backend
+    destinationNamespace: mario-backend
+    # (optional) helm values for the backend chart:
+    values:
+      ingress:
+        enabled: true
+        host: api.mario.local
+        useRegex: false
+  - name: web
+    path: infra/helm/web
+    destinationNamespace: mario-web
+    values:
+      ingress:
+        enabled: true
+        host: web.mario.local
