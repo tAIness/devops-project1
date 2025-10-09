@@ -5,11 +5,9 @@ kind: Service
 metadata:
   name: {{ .Values.db.service.name | default "db" }}
   namespace: {{ .Release.Namespace }}
-  labels:
-    app: mario-db
+  labels: { app: mario-db }
 spec:
-  selector:
-    app: mario-db
+  selector: { app: mario-db }
   ports:
     - name: pg
       port: {{ .Values.db.service.port | default 5432 }}

@@ -16,6 +16,16 @@ apps:
         enabled: true
         host: api.mario.local
         useRegex: false
+
+      db:
+        enabled: true
+        storage:
+          size: 1Gi
+          storageClass: local-path   # you can omit if default class is local-path
+        service:
+          name: db
+          port: 5432
+
   - name: web
     path: infra/helm/web
     destinationNamespace: mario-web

@@ -5,11 +5,11 @@ kind: PersistentVolumeClaim
 metadata:
   name: pg-data
   namespace: {{ .Release.Namespace }}
-  labels:
-    app: mario-db
+  labels: { app: mario-db }
 spec:
-  accessModes: [ReadWriteOnce]
+  accessModes: ["ReadWriteOnce"]
   resources:
     requests:
-      storage: {{ .Values.db.storage | default "1Gi" }}
+      storage: {{ .Values.db.storage.size | default "1Gi" }}
+  storageClassName: {{ .Values.db.storageClassName | default "local-path" }}
 {{- end }}
