@@ -1,5 +1,5 @@
 image:
-  repository: docker.io/itaef/supermario-web
+  repository: docker.io/itaef/supermario-front
   tag: ""                    # empty → uses .Chart.AppVersion
   pullPolicy: IfNotPresent
 
