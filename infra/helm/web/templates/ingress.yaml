@@ -8,16 +8,16 @@ metadata:
   annotations:
     kubernetes.io/ingress.class: {{ .Values.ingress.ingressClassName | default "nginx" | quote }}
 spec:
-  ingressClassName: {{ .Values.ingress.ingressClassName | default "nginx" | quote }}
+  ingressClassName: nginx
   rules:
-  - host: {{ required "ingress.host is required" .Values.ingress.host | quote }}
+  - host: web.mario.local
     http:
       paths:
-      - path: {{ .Values.ingress.path | default "/" | quote }}
+      - path: /
         pathType: Prefix
         backend:
           service:
-            name: {{ .Values.service.name | default "web-svc" | quote }}
+            name: web
             port:
-              number: {{ .Values.service.port | default 80 }}
+              number: 80
 {{- end }}

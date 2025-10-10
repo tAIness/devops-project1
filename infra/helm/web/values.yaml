@@ -3,6 +3,9 @@ image:
   tag: ""                 # use .Chart.AppVersion
   pullPolicy: IfNotPresent
 
+imagePullSecrets:
+  - name: dockerhub-cred
+
 service:
   port: 80
 
@@ -22,3 +25,12 @@ resources:
   limits:
     cpu: 500m
     memory: 256Mi
+
+ingress:
+  enabled: true
+  className: nginx
+  host: web.mario.local
+  paths:
+    - path: /
+      pathType: Prefix
+      servicePort: 80
