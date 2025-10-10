@@ -1,23 +1,23 @@
-{{- $db := (get .Values "db") | default (dict) -}}
-{{- if (get $db "enabled" | default false) }}
+{{- $ing := (get .Values "ingress" | default (dict)) -}}
+{{- if (get $ing "enabled" | default false) }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: web
   namespace: {{ .Release.Namespace }}
   annotations:
-    kubernetes.io/ingress.class: {{ .Values.ingress.ingressClassName | default "nginx" | quote }}
+    kubernetes.io/ingress.class: nginx
 spec:
   ingressClassName: nginx
   rules:
-  - host: web.mario.local
+  - host: {{ get $ing "host" | default "web.mario.local" }}
     http:
       paths:
       - path: /
         pathType: Prefix
         backend:
           service:
-            name: web
+            name: web-svc
             port:
-              number: 80
+              number: {{ .Values.service.port | default 80 }}
 {{- end }}

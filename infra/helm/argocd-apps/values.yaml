@@ -29,10 +29,11 @@ apps:
   - name: web
     path: infra/helm/web
     destinationNamespace: mario-web
-    values:
-      ingress:
-        enabled: true
-        host: web.mario.local
+    # values:  # can omit because chart has defaults now
+    #   ingress:
+    #     enabled: true
+    #     host: web.mario.local
+
     resources:
       requests:
         cpu: 100m
