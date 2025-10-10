@@ -1,4 +1,5 @@
-{{- if .Values.ingress.enabled }}
+{{- $db := (get .Values "db") | default (dict) -}}
+{{- if (get $db "enabled" | default false) }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:

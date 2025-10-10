@@ -1,16 +1,20 @@
 image:
   repository: docker.io/itaef/supermario-front
-  tag: ""                    # empty → uses .Chart.AppVersion
+  tag: ""                 # use .Chart.AppVersion
   pullPolicy: IfNotPresent
 
 service:
-  name: web-svc
   port: 80
 
-# optional extra env for the container
-env: []
+nginx:
+  configMapName: web-nginx
 
-# resources live under a single resources: block
+backend:
+  # Full DNS name of your backend Service (it lives in mario-backend ns)
+  host: app-svc.mario-backend.svc.cluster.local
+  port: 8000
+
+# Optional resources (so Argo/Helm never sees nulls)
 resources:
   requests:
     cpu: 100m
@@ -18,15 +22,3 @@ resources:
   limits:
     cpu: 500m
     memory: 256Mi
-
-replicas: 1
-
-ingress:
-  enabled: true
-  host: web.mario.local
-  path: /
-  ingressClassName: nginx
-
-backend:
-  host: app-svc.mario-backend.svc.cluster.local
-  port: 8000

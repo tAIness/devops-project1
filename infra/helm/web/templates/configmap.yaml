@@ -1,33 +1,36 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: web-nginx
+  name: {{ .Values.nginx.configMapName | default "web-nginx" }}
 data:
   default.conf: |
+    # --- upstream to backend service (full DNS so it works cross-namespace) ---
     upstream backend {
-      server {{ .Values.backend.host }}:{{ .Values.backend.port }};
+      server {{ .Values.backend.host | default "app-svc.mario-backend.svc.cluster.local" }}:{{ .Values.backend.port | default 8000 }};
     }
 
     server {
       listen 80;
 
-      # static app (adjust if your image serves from another path)
+      # static site (SPA-friendly)
       location / {
         try_files $uri $uri/ /index.html;
         root /usr/share/nginx/html;
       }
 
-      # proxy API to backend
-      location /api/ {
-        proxy_pass http://backend;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-      }
-
-      # simple health
+      # health for k8s probes
       location = /health {
         add_header Content-Type application/json;
         return 200 '{"status":"ok"}';
+      }
+
+      # proxy API to backend
+      location /api/ {
+        proxy_pass http://backend;               # keeps original URI (/api/... stays)
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header Connection "";
       }
     }
