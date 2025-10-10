@@ -26,3 +26,7 @@ ingress:
   host: web.mario.local
   path: /
   ingressClassName: nginx
+
+backend:
+  host: app-svc.mario-backend.svc.cluster.local
+  port: 8000
