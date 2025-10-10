@@ -111,20 +111,27 @@ jobs:
   create-tag:
     name: Create & push git tag (from latest main)
     runs-on: ubuntu-latest
-    needs: [bump-helm-appversion]
+    needs: [ compute-tag, bump-helm-appversion ]   # ← add compute-tag here
+    if: ${{ github.ref_type == 'branch' && github.ref_name == 'main' }}
+    env:
+      TAG: ${{ needs.compute-tag.outputs.tag }}  # ← read the tag via env
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
+
       - name: Create tag and push
         shell: bash
         run: |
           set -euo pipefail
+          if [[ -z "${TAG:-}" ]]; then
+            echo "ERROR: TAG is empty (compute-tag output missing). Aborting." >&2
+            exit 1
+          fi
           git fetch --all --tags
           git checkout main
           git pull --ff-only
-          tag='${{ needs.compute-tag.outputs.tag }}'
-          git tag -a "$tag" -m "Release $tag"
-          git push origin "$tag"
+          git tag -a "$TAG" -m "Release $TAG"
+          git push origin "$TAG"
 
   build-and-push-app:
     name: Build & push app image
