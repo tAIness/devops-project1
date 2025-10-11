@@ -1,27 +1,49 @@
 {{- $repo := .Values.global.repoURL -}}
 {{- $root := .Values.global.rootPath | default "" -}}
-{{- $argoNs := .Values.global.argoNamespace | default "argocd" -}}
+{{- $destNs := .Values.global.destinationNamespace | default "argocd" -}}
 
 {{- range .Values.apps }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: {{ .name }}
-  namespace: {{ $argoNs }}
+  namespace: {{ $destNs }}
 spec:
   project: {{ $.Values.project.name | default "default" }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ .destinationNamespace | default $destNs }}
+
+  {{- if .path }}
+  # Repo-path app (your existing pattern)
   source:
     repoURL: {{ $repo | quote }}
     targetRevision: {{ (or .targetRevision $.Chart.AppVersion) | quote }}
     path: {{ printf "%s/%s" $root .path | trimPrefix "/" | quote }}
     {{- if .values }}
     helm:
-      valuesObject:
-{{ toYaml .values | indent 8 }}
+      values: |
+{{ .values | indent 8 }}
     {{- end }}
-  destination:
-    server: https://kubernetes.default.svc
-    namespace: {{ .destinationNamespace | default "default" }}
+  {{- else if .helmChart }}
+  # External Helm chart app (monitoring etc.)
+  source:
+    repoURL: {{ .repoURL | quote }}
+    chart: {{ .helmChart | quote }}
+    targetRevision: {{ .targetRevision | quote }}
+    {{- if .helm.values }}
+    helm:
+      values: |
+{{ .helm.values | indent 8 }}
+    {{- end }}
+  {{- else }}
+  # Safety net: neither path nor helmChart provided
+  source:
+    repoURL: {{ $repo | quote }}
+    targetRevision: {{ (or .targetRevision $.Chart.AppVersion) | quote }}
+    path: "."
+  {{- end }}
+
   syncPolicy:
     automated:
       prune: true

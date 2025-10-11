@@ -41,3 +41,46 @@ apps:
       limits:
         cpu: 500m
         memory: 256Mi
+
+  - name: monitoring
+    destinationNamespace: monitoring
+    helmChart: kube-prometheus-stack
+    repoURL: https://prometheus-community.github.io/helm-charts
+    targetRevision: 62.3.0
+    helm:
+      values: |
+        # Minikube-friendly (don’t try to scrape control-plane)
+        kubeEtcd: { enabled: false }
+        kubeControllerManager: { enabled: false }
+        kubeScheduler: { enabled: false }
+        defaultRules:
+          rules:
+            etcd: false
+            kubeControllerManager: false
+            kubeScheduler: false
+
+      grafana:
+        adminUser: admin
+        adminPassword: admin
+        ingress:
+          enabled: true
+          ingressClassName: nginx
+          hosts: [grafana.mario.local]
+
+      prometheus:
+        ingress:
+          enabled: true
+          ingressClassName: nginx
+          hosts: [prometheus.mario.local]
+        prometheusSpec:
+          # discover ServiceMonitors/PodMonitors cluster-wide
+          serviceMonitorSelectorNilUsesHelmValues: false
+          podMonitorSelectorNilUsesHelmValues: false
+          serviceMonitorNamespaceSelector: {}
+          podMonitorNamespaceSelector: {}
+
+      alertmanager:
+        ingress:
+          enabled: true
+          ingressClassName: nginx
+          hosts: [alertmanager.mario.local]
