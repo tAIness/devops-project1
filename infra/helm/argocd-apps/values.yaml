@@ -49,56 +49,56 @@ helmApps:
       repoURL: https://prometheus-community.github.io/helm-charts
       chart: kube-prometheus-stack
       targetRevision: 62.3.0
-      helm:
-        skipCrds: false          # <= MUST be under 'helm'
-        values: |                # <= all chart overrides go inside this block
-         kubeEtcd: { enabled: false }
-          kubeControllerManager: { enabled: false }
-          kubeScheduler: { enabled: false }
-          defaultRules:
-            rules:
-              etcd: false
-              kubeControllerManager: false
-              kubeScheduler: false
+    helm:
+      skipCrds: false          # <= MUST be under 'helm'
+      values: |                # <= all chart overrides go inside this block
+      kubeEtcd: { enabled: false }
+      kubeControllerManager: { enabled: false }
+      kubeScheduler: { enabled: false }
+      defaultRules:
+    rules:
+      etcd: false
+      kubeControllerManager: false
+      kubeScheduler: false
 
-        grafana:
-            admin:
-              existingSecret: grafana-admin
-              userKey: admin-user
-              passwordKey: admin-password
-            ingress:
-              enabled: true
-              ingressClassName: nginx
-              hosts: [grafana.mario.local]
-            service:
-              type: ClusterIP
+    grafana:
+      admin:
+        existingSecret: grafana-admin
+        userKey: admin-user
+        passwordKey: admin-password
+    ingress:
+        enabled: true
+        ingressClassName: nginx
+        hosts: [grafana.mario.local]
+    service:
+        type: ClusterIP
 
-        prometheus:
-            ingress:
-              enabled: true
-              ingressClassName: nginx
-              hosts: [prometheus.mario.local]
-            prometheusSpec:
-              serviceMonitorSelectorNilUsesHelmValues: false
-              podMonitorSelectorNilUsesHelmValues: false
-              serviceMonitorNamespaceSelector: {}
-              podMonitorNamespaceSelector: {}
+    prometheus:
+      ingress:
+        enabled: true
+        ingressClassName: nginx
+        hosts: [prometheus.mario.local]
+    prometheusSpec:
+        serviceMonitorSelectorNilUsesHelmValues: false
+        podMonitorSelectorNilUsesHelmValues: false
+        serviceMonitorNamespaceSelector: {}
+        podMonitorNamespaceSelector: {}
 
-        alertmanager:
-            enabled: true
-            ingress:
-              enabled: true
-              ingressClassName: nginx
-              hosts: [alertmanager.mario.local]
-            alertmanagerSpec:
-              storage:
-                volumeClaimTemplate:
-                  spec:
-                    storageClassName: local-path
-                    accessModes: ["ReadWriteOnce"]
-                    resources:
-                      requests:
-                        storage: 1Gi
+    alertmanager:
+        enabled: true
+        ingress:
+          enabled: true
+          ingressClassName: nginx
+          hosts: [alertmanager.mario.local]
+    alertmanagerSpec:
+       storage:
+       volumeClaimTemplate:
+       spec:
+       storageClassName: local-path
+       accessModes: ["ReadWriteOnce"]
+       resources:
+         requests:
+         storage: 1Gi
 
 secrets:
   - namespace: monitoring
