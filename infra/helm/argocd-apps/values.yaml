@@ -50,7 +50,7 @@ helmApps:
       chart: kube-prometheus-stack
       targetRevision: 62.3.0
     helm:
-      skipCrds: false          # <= MUST be under 'helm'
+      skipCrds: true          # <= MUST be under 'helm'
       values: |                # <= all chart overrides go inside this block
       kubeEtcd: { enabled: false }
       kubeControllerManager: { enabled: false }
