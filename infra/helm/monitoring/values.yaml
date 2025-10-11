@@ -1,45 +1,10 @@
-kube-prometheus-stack:
-  # Turn off control-plane components not present in minikube
-  kubeEtcd: { enabled: false }
-  kubeControllerManager: { enabled: false }
-  kubeScheduler: { enabled: false }
-  defaultRules:
-    rules:
-      etcd: false
-      kubeControllerManager: false
-      kubeScheduler: false
+# values for monitoring-extras (no kube-prometheus-stack keys here)
+enabled: true
 
-  grafana:
-    # Use a Secret for admin creds (recommended).
-    # First create it in the cluster:
-    #   kubectl -n monitoring create secret generic grafana-admin \
-    #     --from-literal=admin-user=admin \
-    #     --from-literal=admin-password='CHANGE_ME_STRONG'
-    admin:
-      existingSecret: grafana-admin
-      userKey: admin-user
-      passwordKey: admin-password
+# where the ingress controller runs
+ingressNginxNamespace: ingress-nginx
+ingressMetricsPort: 10254
 
-    ingress:
-      enabled: true
-      ingressClassName: nginx
-      hosts: [grafana.mario.local]
-    service:
-      type: ClusterIP
-
-  prometheus:
-    ingress:
-      enabled: true
-      ingressClassName: nginx
-      hosts: [prometheus.mario.local]
-    prometheusSpec:
-      serviceMonitorSelectorNilUsesHelmValues: false
-      podMonitorSelectorNilUsesHelmValues: false
-      serviceMonitorNamespaceSelector: {}
-      podMonitorNamespaceSelector: {}
-
-  alertmanager:
-    ingress:
-      enabled: true
-      ingressClassName: nginx
-      hosts: [alertmanager.mario.local]
+# must match the Helm release name & namespace used by the Argo CD app
+promStackRelease: monitoring
+promStackNamespace: monitoring
