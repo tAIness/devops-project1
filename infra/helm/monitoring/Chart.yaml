@@ -1,0 +1,11 @@
+apiVersion: v2
+name: monitoring
+description: Wraps kube-prometheus-stack and adds local extras
+type: application
+version: 0.1.0
+appVersion: "v0"
+
+dependencies:
+  - name: kube-prometheus-stack
+    version: "62.3.0"             # or a current compatible version
+    repository: https://prometheus-community.github.io/helm-charts
