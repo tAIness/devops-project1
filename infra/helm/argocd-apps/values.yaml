@@ -31,7 +31,7 @@ apps:
 
       db:
         enabled: true
-        storage: { size: 1Gi, storageClass: local-path }
+        storage: { size: 1Gi, storageClass: standard }
         service: { name: db, port: 5432 }
 
   - name: web
