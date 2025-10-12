@@ -10,6 +10,7 @@ project:
 apps:
   - name: backend
     path: infra/helm/backend
+    targetRevision: ""
     destinationNamespace: mario-backend
     values:
       ingress:
@@ -39,6 +40,7 @@ apps:
   - name: web
     path: infra/helm/web
     destinationNamespace: mario-web
+    targetRevision: ""
     values:
       ingress:
         enabled: true
