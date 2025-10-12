@@ -1,8 +1,11 @@
+# infra/helm/argocd-apps/values.yaml
+
 global:
   argoNamespace: argocd
   repoURL: https://github.com/tAIness/devops-project1.git
   rootPath: ""
-  targetRevision: HEAD
+  # optional: set a fixed git ref for in-repo apps; defaults to HEAD in template
+  # targetRevision: v1.0.79
 
 project:
   enabled: true
@@ -30,9 +33,9 @@ apps:
     path: infra/helm/web
     destinationNamespace: mario-web
     values:
-      resources:
-        requests: { cpu: 100m, memory: 128Mi }
-        limits:   { cpu: 500m, memory: 256Mi }
+      ingress:
+        enabled: true
+        host: web.mario.local
 
 helmApps:
   - name: monitoring
@@ -44,6 +47,7 @@ helmApps:
     helm:
       skipCrds: false
       values: |
+        # Disable control-plane bits not present on minikube
         kubeEtcd: { enabled: false }
         kubeControllerManager: { enabled: false }
         kubeScheduler: { enabled: false }
@@ -53,7 +57,7 @@ helmApps:
             kubeControllerManager: false
             kubeScheduler: false
 
-      grafana:
+        grafana:
           admin:
             existingSecret: grafana-admin
             userKey: admin-user
@@ -61,37 +65,42 @@ helmApps:
           ingress:
             enabled: true
             ingressClassName: nginx
-            hosts: [grafana.mario.local]
+            hosts:
+              - grafana.mario.local
           service:
             type: ClusterIP
 
-      prometheus:
+        prometheus:
           ingress:
             enabled: true
             ingressClassName: nginx
-            hosts: [prometheus.mario.local]
+            hosts:
+              - prometheus.mario.local
           prometheusSpec:
             serviceMonitorSelectorNilUsesHelmValues: false
             podMonitorSelectorNilUsesHelmValues: false
             serviceMonitorNamespaceSelector: {}
             podMonitorNamespaceSelector: {}
 
-      alertmanager:
+        alertmanager:
           enabled: true
           ingress:
             enabled: true
             ingressClassName: nginx
-            hosts: [alertmanager.mario.local]
+            hosts:
+              - alertmanager.mario.local
           alertmanagerSpec:
             storage:
               volumeClaimTemplate:
                 spec:
                   storageClassName: local-path
-                  accessModes: ["ReadWriteOnce"]
+                  accessModes:
+                    - ReadWriteOnce
                   resources:
                     requests:
                       storage: 1Gi
 
+# This relies on your templates/secrets.yaml to render a Secret from here
 secrets:
   - namespace: monitoring
     name: grafana-admin
