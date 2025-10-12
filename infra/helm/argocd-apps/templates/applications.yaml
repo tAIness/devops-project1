@@ -14,7 +14,7 @@ spec:
     namespace: {{ $app.destinationNamespace }}
   source:
     repoURL: {{ $.Values.global.repoURL }}
-    targetRevision: {{ $.Values.global.targetRevision | default "" }}
+    targetRevision: {{ default "main" (default $app.targetRevision $.Values.global.targetRevision) }}
     path: {{ $app.path }}
     {{- if $app.values }}
     helm:
