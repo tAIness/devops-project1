@@ -1,4 +1,3 @@
-# templates/db-pvc.yaml
 {{- $db := (get .Values "db") | default (dict) -}}
 {{- if (get $db "enabled" | default false) }}
 apiVersion: v1
@@ -13,6 +12,6 @@ spec:
     requests:
       storage: {{ .Values.db.storage.size | default "1Gi" }}
 {{- if .Values.db.storageClassName }}
-     storageClassName: {{ .Values.db.storageClassName }}
-      {{- end }}
+  storageClassName: {{ .Values.db.storageClassName }}
+{{- end }}
 {{- end }}
