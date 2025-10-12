@@ -3,4 +3,4 @@ name: web
 description: Mario web
 type: application
 version: 0.1.0
-appVersion: "v1.0.97" # ← CI will bump this to your release tag
+appVersion: "v1.0.98" # ← CI will bump this to your release tag
