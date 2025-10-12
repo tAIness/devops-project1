@@ -16,6 +16,19 @@ apps:
         enabled: true
         host: api.mario.local
         useRegex: false
+
+      secrets:
+        createDbCreds: true
+        createDbConn: true
+        dbCreds:
+          POSTGRES_DB: mario
+          POSTGRES_USER: mario
+          POSTGRES_PASSWORD: mario123
+
+      dbConn:
+          # Or use DNS: db.mario-backend.svc.cluster.local
+          url: "postgres://mario:mario123@db:5432/mario"
+
       db:
         enabled: true
         storage: { size: 1Gi, storageClass: local-path }
@@ -76,10 +89,11 @@ helmApps:
             ingressClassName: nginx
             hosts: [alertmanager.mario.local]
           alertmanagerSpec:
+            replicas: 1 
             storage:
               volumeClaimTemplate:
                 spec:
-                  storageClassName: local-path
+                  storageClassName: standard
                   accessModes: ["ReadWriteOnce"]
                   resources:
                     requests:

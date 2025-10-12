@@ -1,3 +1,4 @@
+# templates/deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -24,9 +25,15 @@ spec:
               done
           env:
             - name: POSTGRES_USER
-              valueFrom: { secretKeyRef: { name: db-secrets, key: POSTGRES_USER } }
+              valueFrom:
+                 secretKeyRef:
+                   name: {{ .Values.db.secrets.credsName | default "db-secrets" }}
+                   key: POSTGRES_USER
             - name: POSTGRES_DB
-              valueFrom: { secretKeyRef: { name: db-secrets, key: POSTGRES_DB } }
+              valueFrom:
+                 secretKeyRef:
+                   name: {{ .Values.db.secrets.credsName | default "db-secrets" }}
+                   key: POSTGRES_DB
       containers:
         - name: app
           image: "{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}"

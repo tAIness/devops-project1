@@ -1,4 +1,4 @@
-{{- /* Render one Argo CD Application per Helm chart in repo (apps) */ -}}
+{{- /* One Argo CD Application per in-repo app */ -}}
 {{- range $app := .Values.apps | default (list) }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -18,7 +18,7 @@ spec:
     path: {{ $app.path }}
     {{- if $app.values }}
     helm:
-      valuesObject:
+      values: |
 {{ toYaml $app.values | indent 8 }}
     {{- end }}
   syncPolicy:
@@ -27,7 +27,7 @@ spec:
 ---
 {{- end }}
 
-{{- /* Render one Argo CD Application per external Helm chart (helmApps) */ -}}
+{{- /* One Argo CD Application per external Helm chart */ -}}
 {{- range $h := .Values.helmApps | default (list) }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -55,6 +55,6 @@ spec:
       {{- end }}
   syncPolicy:
     automated: { prune: true, selfHeal: true }
-    syncOptions: [ "CreateNamespace=true" , "ServerSideApply=true" , "Replace=true" ]
+    syncOptions: [ "CreateNamespace=true","ServerSideApply=true","Replace=true" ]
 ---
 {{- end }}

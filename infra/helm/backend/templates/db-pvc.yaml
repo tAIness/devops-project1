@@ -1,3 +1,4 @@
+# templates/db-pvc.yaml
 {{- $db := (get .Values "db") | default (dict) -}}
 {{- if (get $db "enabled" | default false) }}
 apiVersion: v1
@@ -11,5 +12,7 @@ spec:
   resources:
     requests:
       storage: {{ .Values.db.storage.size | default "1Gi" }}
-  storageClassName: {{ .Values.db.storageClassName | default "local-path" }}
+{{- if .Values.db.storageClassName }}
+     storageClassName: {{ .Values.db.storageClassName }}
+      {{- end }}
 {{- end }}

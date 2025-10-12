@@ -1,0 +1,21 @@
+{{- /* Collect unique namespaces from apps, helmApps, and secrets */ -}}
+{{- $ns := dict -}}
+{{- range .Values.apps }}
+  {{- $_ := set $ns .destinationNamespace true -}}
+{{- end }}
+{{- range .Values.helmApps }}
+  {{- $_ := set $ns .destinationNamespace true -}}
+{{- end }}
+{{- range .Values.secrets }}
+  {{- $_ := set $ns .namespace true -}}
+{{- end }}
+
+{{- range $name, $_ := $ns }}
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: {{ $name }}
+  annotations:
+    argocd.argoproj.io/sync-wave: "-2"
+---
+{{- end }}
