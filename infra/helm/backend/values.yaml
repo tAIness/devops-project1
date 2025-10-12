@@ -36,7 +36,8 @@ autoscaling:
 db:
   enabled: true
   image: postgres:15
-  storage: 1Gi
+  storage:
+    size: 1Gi
   service: { name: db, port: 5432 }
   secrets: { credsName: db-secrets }
 
