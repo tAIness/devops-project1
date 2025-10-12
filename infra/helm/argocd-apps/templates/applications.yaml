@@ -1,28 +1,60 @@
-{{- $repo := .Values.global.repoURL -}}
-{{- $root := .Values.global.rootPath | default "" -}}
-{{- $argoNs := .Values.global.argoNamespace | default "argocd" -}}
-
-{{- range .Values.apps }}
+{{- /* Render one Argo CD Application per Helm chart in repo (apps) */ -}}
+{{- range $app := .Values.apps | default (list) }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
-  name: {{ .name }}
-  namespace: {{ $argoNs }}
+  name: {{ $app.name }}
+  namespace: {{ $.Values.global.argoNamespace | default "argocd" }}
+  annotations:
+    argocd.argoproj.io/tracking-id: {{ printf "%s:%s/%s:%s/%s" "argocd-apps" "argoproj.io" "Application" ($.Values.global.argoNamespace | default "argocd") $app.name }}
 spec:
   project: {{ $.Values.project.name | default "default" }}
-  source:
-    repoURL: {{ $repo | quote }}
-    targetRevision: {{ (or .targetRevision $.Chart.AppVersion) | quote }}
-    path: {{ printf "%s/%s" $root .path | trimPrefix "/" | quote }}
-    {{- if .values }}
-    helm:
-      valuesObject:
-{{ toYaml .values | indent 8 }}
-    {{- end }}
   destination:
     server: https://kubernetes.default.svc
-    namespace: {{ .destinationNamespace | default "default" }}
+    namespace: {{ $app.destinationNamespace }}
+  source:
+    repoURL: {{ $.Values.global.repoURL }}
+    targetRevision: {{ $.Values.global.targetRevision | default "HEAD" }}
+    path: {{ $app.path }}
+    {{- if $app.values }}
+    helm:
+      valuesObject:
+{{ toYaml $app.values | indent 8 }}
+    {{- end }}
   syncPolicy:
-    automated:
-      prune: true
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [ "CreateNamespace=true" ]
+---
+{{- end }}
+
+{{- /* Render one Argo CD Application per external Helm chart (helmApps) */ -}}
+{{- range $h := .Values.helmApps | default (list) }}
+apiVersion: argoproj.io/v1alpha1
+kind: Application
+metadata:
+  name: {{ $h.name }}
+  namespace: {{ $.Values.global.argoNamespace | default "argocd" }}
+spec:
+  project: {{ $.Values.project.name | default "default" }}
+  destination:
+    server: https://kubernetes.default.svc
+    namespace: {{ $h.destinationNamespace }}
+  source:
+    repoURL: {{ $h.source.repoURL }}
+    chart: {{ $h.source.chart }}
+    targetRevision: {{ $h.source.targetRevision }}
+    helm:
+      {{- if hasKey $h "helm" }}
+      {{- if hasKey $h.helm "skipCrds" }}
+      skipCrds: {{ $h.helm.skipCrds }}
+      {{- end }}
+      {{- if hasKey $h.helm "values" }}
+      values: |
+{{ $h.helm.values | indent 8 }}
+      {{- end }}
+      {{- end }}
+  syncPolicy:
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [ "CreateNamespace=true" ]
+---
 {{- end }}
