@@ -1,11 +1,7 @@
-# infra/helm/argocd-apps/values.yaml
-
 global:
   argoNamespace: argocd
   repoURL: https://github.com/tAIness/devops-project1.git
-  rootPath: ""
-  # optional: set a fixed git ref for in-repo apps; defaults to HEAD in template
-  # targetRevision: v1.0.79
+  targetRevision: HEAD
 
 project:
   enabled: true
@@ -22,12 +18,8 @@ apps:
         useRegex: false
       db:
         enabled: true
-        storage:
-          size: 1Gi
-          storageClass: local-path
-        service:
-          name: db
-          port: 5432
+        storage: { size: 1Gi, storageClass: local-path }
+        service: { name: db, port: 5432 }
 
   - name: web
     path: infra/helm/web
@@ -47,7 +39,6 @@ helmApps:
     helm:
       skipCrds: false
       values: |
-        # Disable control-plane bits not present on minikube
         kubeEtcd: { enabled: false }
         kubeControllerManager: { enabled: false }
         kubeScheduler: { enabled: false }
@@ -65,17 +56,13 @@ helmApps:
           ingress:
             enabled: true
             ingressClassName: nginx
-            hosts:
-              - grafana.mario.local
-          service:
-            type: ClusterIP
+            hosts: [grafana.mario.local]
 
         prometheus:
           ingress:
             enabled: true
             ingressClassName: nginx
-            hosts:
-              - prometheus.mario.local
+            hosts: [prometheus.mario.local]
           prometheusSpec:
             serviceMonitorSelectorNilUsesHelmValues: false
             podMonitorSelectorNilUsesHelmValues: false
@@ -87,20 +74,17 @@ helmApps:
           ingress:
             enabled: true
             ingressClassName: nginx
-            hosts:
-              - alertmanager.mario.local
+            hosts: [alertmanager.mario.local]
           alertmanagerSpec:
             storage:
               volumeClaimTemplate:
                 spec:
                   storageClassName: local-path
-                  accessModes:
-                    - ReadWriteOnce
+                  accessModes: ["ReadWriteOnce"]
                   resources:
                     requests:
                       storage: 1Gi
 
-# This relies on your templates/secrets.yaml to render a Secret from here
 secrets:
   - namespace: monitoring
     name: grafana-admin
