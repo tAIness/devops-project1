@@ -63,7 +63,7 @@ jobs:
   bump-helm-appversion:
     name: Bump Helm appVersion in all charts & push
     runs-on: ubuntu-latest
-    needs: [compute-tag]
+    needs: [ compute-tag ]
     if: ${{ github.ref_type == 'branch' && github.ref_name == 'main' }}
     env:
       TAG: ${{ needs.compute-tag.outputs.tag }}
@@ -81,7 +81,7 @@ jobs:
           chmod +x /usr/local/bin/yq
           yq --version
 
-      - name: Update appVersion for ALL charts
+      - name: Update appVersion for ALL charts + write releaseTag
         shell: bash
         run: |
           set -euo pipefail
@@ -94,7 +94,6 @@ jobs:
             echo "Updating $f to appVersion=${TAG}"
             yq -i '.appVersion = env(TAG)' "$f"
           done
-        # write global.releaseTag in argocd-apps values.yaml
           echo "Setting global.releaseTag=${TAG} in infra/helm/argocd-apps/values.yaml"
           yq -i '.global.releaseTag = env(TAG)' infra/helm/argocd-apps/values.yaml
 
@@ -106,8 +105,8 @@ jobs:
           if git diff --quiet; then
             echo "No changes to commit."
           else
-            git add infra/helm/**/Chart.yaml
-            git commit -m "chore(helm): set appVersion=${TAG} for all charts"
+            git add infra/helm/**/Chart.yaml infra/helm/argocd-apps/values.yaml
+            git commit -m "chore(helm): set appVersion & releaseTag ${TAG}"
             git push origin HEAD:main
           fi
 
