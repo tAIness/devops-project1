@@ -36,7 +36,7 @@ spec:
                    key: POSTGRES_DB
       containers:
         - name: app
-          image: "{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
           ports: [{ name: http, containerPort: {{ .Values.service.port }} }]
           env:

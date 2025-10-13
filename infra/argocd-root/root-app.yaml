@@ -1,3 +1,4 @@
+# root-apps.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -10,7 +11,7 @@ spec:
     namespace: argocd
   source:
     repoURL: https://github.com/tAIness/devops-project1.git
-    targetRevision: ""
+    targetRevision: main
     path: infra/helm/argocd-apps  # ← points to your chart folder
     helm: {}                      # (optional) valueFiles: [...] if you use non-defaults
   syncPolicy:
