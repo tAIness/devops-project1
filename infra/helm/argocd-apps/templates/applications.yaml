@@ -66,5 +66,14 @@ spec:
       - CreateNamespace=true
       - ServerSideApply=true
       - Replace=true
+    ignoreDifferences:
+      - group: ""
+        kind: PersistentVolumeClaim
+        name: pg-data
+        jsonPointers:
+          - /spec/volumeName
+          - /spec/storageClassName
+          - /spec/dataSource
+          - /spec/dataSourceRef
 ---
 {{- end }}
