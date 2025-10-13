@@ -21,6 +21,11 @@ spec:
       values: |
 {{ toYaml $app.values | indent 8 }}
     {{- end }}
+  info:
+    - name: Release
+      value: {{ default "unknown" $.Values.global.releaseTag | quote }}
+    - name: Image
+      value: "{{ (dig "image" "repository" "" $app.values | default (dig "image" "repository" "" $app.helm.values)) }}:{{ default $.Values.global.releaseTag (dig "image" "tag" "" $app.values | default (dig "image" "tag" "" $app.helm.values)) }}"
   syncPolicy:
     automated: { prune: true, selfHeal: true }
     syncOptions: [ "CreateNamespace=true" ]
@@ -53,6 +58,11 @@ spec:
 {{ $h.helm.values | indent 8 }}
       {{- end }}
       {{- end }}
+  info:
+    - name: Chart
+      value: "{{ $h.source.chart }}@{{ $h.source.targetRevision }}"
+    - name: Release
+      value: {{ default "unknown" $.Values.global.releaseTag | quote }}
   syncPolicy:
     automated: { prune: true, selfHeal: true }
     syncOptions: [ "CreateNamespace=true","ServerSideApply=true","Replace=true" ]
