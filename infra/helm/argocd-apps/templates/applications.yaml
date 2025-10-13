@@ -65,7 +65,7 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
-      - Replace=true
+    #  - Replace=true
     ignoreDifferences:
       - group: ""
         kind: PersistentVolumeClaim
