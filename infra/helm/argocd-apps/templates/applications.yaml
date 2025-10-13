@@ -1,4 +1,4 @@
-{{- /* One Argo CD Application per in-repo app */ -}}
+{{- /* ========================= In-repo apps (Git path + Helm values) ========================= */ -}}
 {{- range $app := .Values.apps | default (list) }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -6,7 +6,10 @@ metadata:
   name: {{ $app.name }}
   namespace: {{ $.Values.global.argoNamespace | default "argocd" }}
   annotations:
+    # Keep Argo CD tracking stable across renames:
     argocd.argoproj.io/tracking-id: {{ printf "%s:%s/%s:%s/%s" "argocd-apps" "argoproj.io" "Application" ($.Values.global.argoNamespace | default "argocd") $app.name }}
+    # Force a diff when the release tag changes so spec.info updates:
+    apps.tiny/release-tag: {{ default "unknown" $.Values.global.releaseTag | quote }}
 spec:
   project: {{ $.Values.project.name | default "default" }}
   destination:
@@ -40,17 +43,19 @@ spec:
         {{- if $repo }}{{ printf "%s:%s" $repo $tag }}{{ else }}unknown{{ end }}
   syncPolicy:
     automated: { prune: true, selfHeal: true }
-    syncOptions: [ "CreateNamespace=true" ]
+    syncOptions: [ "CreateNamespace=true", "ServerSideApply=true", "Replace=true" ]
 ---
 {{- end }}
 
-{{- /* One Argo CD Application per external Helm chart */ -}}
+{{- /* ========================= External Helm charts (chart repo) ========================= */ -}}
 {{- range $h := .Values.helmApps | default (list) }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: {{ $h.name }}
   namespace: {{ $.Values.global.argoNamespace | default "argocd" }}
+  annotations:
+    apps.tiny/release-tag: {{ default "unknown" $.Values.global.releaseTag | quote }}
 spec:
   project: {{ $.Values.project.name | default "default" }}
   destination:
@@ -77,6 +82,6 @@ spec:
       value: {{ default "unknown" $.Values.global.releaseTag | quote }}
   syncPolicy:
     automated: { prune: true, selfHeal: true }
-    syncOptions: [ "CreateNamespace=true","ServerSideApply=true","Replace=true" ]
+    syncOptions: [ "CreateNamespace=true", "ServerSideApply=true", "Replace=true" ]
 ---
 {{- end }}
