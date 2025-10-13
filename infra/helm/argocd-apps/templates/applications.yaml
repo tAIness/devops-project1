@@ -1,16 +1,12 @@
-{{- /* ========================= In-repo apps (Git path + Helm values) ========================= */ -}}
-{{- range $app := .Values.apps | default (list) }}
+{{- /* ========= In-repo apps ========= */ -}}
+{{- range $app := (.Values.apps | default (list)) }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: {{ $app.name }}
-  namespace: {{ $.Values.global.argoNamespace | default "argocd" }}
-  annotations:
-    argocd.argoproj.io/tracking-id: {{ printf "%s:%s/%s:%s/%s" "argocd-apps" "argoproj.io" "Application" ($.Values.global.argoNamespace | default "argocd") $app.name }}
-    # force a diff when the release tag changes so Argo updates spec.info
-    apps.tiny/release-tag: {{ default "unknown" $.Values.global.releaseTag | quote }}
+  namespace: {{ default "argocd" $.Values.global.argoNamespace }}
 spec:
-  project: {{ $.Values.project.name | default "default" }}
+  project: {{ default "default" $.Values.project.name }}
   destination:
     server: https://kubernetes.default.svc
     namespace: {{ $app.destinationNamespace }}
@@ -18,42 +14,35 @@ spec:
     repoURL: {{ $.Values.global.repoURL }}
     targetRevision: {{ default "main" (default $app.targetRevision $.Values.global.targetRevision) }}
     path: {{ $app.path }}
-
-    {{- /* Merge apps[].helm.values and apps[].values into one map for rendering */ -}}
-    {{- $hv := (default dict $app.helm.values) -}}
-    {{- $v  := (default dict $app.values) -}}
-    {{- $merged := merge (deepCopy $hv) $v -}}
-    {{- if or (not (empty $hv)) (not (empty $v)) }}
     helm:
       values: |
-{{ toYaml $merged | indent 8 }}
-    {{- end }}
-
-  {{- /* Build display strings using the merged values, fallback to global.releaseTag */ -}}
-  {{- $repo := (dig "image" "repository" "" $merged) -}}
-  {{- $tag  := (default $.Values.global.releaseTag (dig "image" "tag" "" $merged)) -}}
+{{ toYaml ($app.helm.values | default dict) | nindent 8 }}
+{{ toYaml ($app.values       | default dict) | nindent 8 }}
   info:
     - name: Release
       value: {{ default "unknown" $.Values.global.releaseTag | quote }}
     - name: Image
-      value: {{- if $repo -}}{{ printf "%s:%s" $repo $tag | quote }}{{- else -}}"unknown"{{- end }}
+      value: {{ $repo := (dig "image" "repository" "" ($app.helm.values | default dict)) | default (dig "image" "repository" "" ($app.values | default dict)) }}{{ $tag := (dig "image" "tag" "" ($app.helm.values | default dict)) | default (dig "image" "tag" "" ($app.values | default dict)) | default $.Values.global.releaseTag }}{{ if $repo }}{{ printf "%s:%s" $repo $tag | quote }}{{ else }}"unknown"{{ end }}
   syncPolicy:
-    automated: { prune: true, selfHeal: true }
-    syncOptions: [ "CreateNamespace=true", "ServerSideApply=true", "Replace=true" ]
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - Replace=true
 ---
 {{- end }}
 
-{{- /* ========================= External Helm charts (chart repo) ========================= */ -}}
-{{- range $h := .Values.helmApps | default (list) }}
+{{- /* ========= External Helm charts ========= */ -}}
+{{- range $h := (.Values.helmApps | default (list)) }}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: {{ $h.name }}
-  namespace: {{ $.Values.global.argoNamespace | default "argocd" }}
-  annotations:
-    apps.tiny/release-tag: {{ default "unknown" $.Values.global.releaseTag | quote }}
+  namespace: {{ default "argocd" $.Values.global.argoNamespace }}
 spec:
-  project: {{ $.Values.project.name | default "default" }}
+  project: {{ default "default" $.Values.project.name }}
   destination:
     server: https://kubernetes.default.svc
     namespace: {{ $h.destinationNamespace }}
@@ -62,22 +51,20 @@ spec:
     chart: {{ $h.source.chart }}
     targetRevision: {{ $h.source.targetRevision }}
     helm:
-      {{- if hasKey $h "helm" }}
-      {{- if hasKey $h.helm "skipCrds" }}
-      skipCrds: {{ $h.helm.skipCrds }}
-      {{- end }}
-      {{- if hasKey $h.helm "values" }}
       values: |
-{{ $h.helm.values | indent 8 }}
-      {{- end }}
-      {{- end }}
+{{ toYaml (dig "helm" "values" dict $h | default dict) | nindent 8 }}
   info:
     - name: Chart
       value: "{{ $h.source.chart }}@{{ $h.source.targetRevision }}"
     - name: Release
       value: {{ default "unknown" $.Values.global.releaseTag | quote }}
   syncPolicy:
-    automated: { prune: true, selfHeal: true }
-    syncOptions: [ "CreateNamespace=true", "ServerSideApply=true", "Replace=true" ]
+    automated:
+      prune: true
+      selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+      - Replace=true
 ---
 {{- end }}
