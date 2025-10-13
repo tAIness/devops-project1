@@ -2,12 +2,10 @@ global:
   argoNamespace: argocd
   repoURL: https://github.com/tAIness/devops-project1.git
   targetRevision: main
-  releaseTag: ""   # CI will set this each release
-
+  releaseTag: "v1.0.109" # CI will set this each release
 project:
   enabled: true
   name: default
-
 apps:
   - name: backend
     path: infra/helm/backend
@@ -16,13 +14,12 @@ apps:
       values:
         image:
           repository: docker.io/itaef/supermario-service
-          tag: ""   # empty → chart uses .Chart.AppVersion
+          tag: "" # empty → chart uses .Chart.AppVersion
     values:
       ingress:
         enabled: true
         host: api.mario.local
         useRegex: false
-
       secrets:
         createDbCreds: true
         createDbConn: true
@@ -30,18 +27,15 @@ apps:
           POSTGRES_DB: mario
           POSTGRES_USER: mario
           POSTGRES_PASSWORD: mario123
-
       dbConn:
-          # Or use DNS: db.mario-backend.svc.cluster.local
-          url: "postgres://mario:mario123@db:5432/mario"
-
+        # Or use DNS: db.mario-backend.svc.cluster.local
+        url: "postgres://mario:mario123@db:5432/mario"
       db:
         enabled: true
         storage:
           size: 1Gi
         storageClassName: standard
-        service: { name: db, port: 5432 }
-
+        service: {name: db, port: 5432}
   - name: web
     path: infra/helm/web
     destinationNamespace: mario-web
@@ -50,12 +44,11 @@ apps:
       values:
         image:
           repository: docker.io/itaef/supermario-front
-          tag: ""   # empty → chart uses .Chart.AppVersion
+          tag: "" # empty → chart uses .Chart.AppVersion
     values:
       ingress:
         enabled: true
         host: web.mario.local
-
 helmApps:
   - name: monitoring
     destinationNamespace: monitoring
@@ -65,54 +58,7 @@ helmApps:
       targetRevision: 62.3.0
     helm:
       skipCrds: false
-      values: |
-        kubeEtcd: { enabled: false }
-        kubeControllerManager: { enabled: false }
-        kubeScheduler: { enabled: false }
-        defaultRules:
-          rules:
-            etcd: false
-            kubeControllerManager: false
-            kubeScheduler: false
-
-        grafana:
-          admin:
-            existingSecret: grafana-admin
-            userKey: admin-user
-            passwordKey: admin-password
-          ingress:
-            enabled: true
-            ingressClassName: nginx
-            hosts: [grafana.mario.local]
-
-        prometheus:
-          ingress:
-            enabled: true
-            ingressClassName: nginx
-            hosts: [prometheus.mario.local]
-          prometheusSpec:
-            serviceMonitorSelectorNilUsesHelmValues: false
-            podMonitorSelectorNilUsesHelmValues: false
-            serviceMonitorNamespaceSelector: {}
-            podMonitorNamespaceSelector: {}
-
-        alertmanager:
-          enabled: true
-          ingress:
-            enabled: true
-            ingressClassName: nginx
-            hosts: [alertmanager.mario.local]
-          alertmanagerSpec:
-            replicas: 1 
-            storage:
-              volumeClaimTemplate:
-                spec:
-                  storageClassName: standard
-                  accessModes: ["ReadWriteOnce"]
-                  resources:
-                    requests:
-                      storage: 1Gi
-
+      values: "kubeEtcd: { enabled: false }\nkubeControllerManager: { enabled: false }\nkubeScheduler: { enabled: false }\ndefaultRules:\n  rules:\n    etcd: false\n    kubeControllerManager: false\n    kubeScheduler: false\n\ngrafana:\n  admin:\n    existingSecret: grafana-admin\n    userKey: admin-user\n    passwordKey: admin-password\n  ingress:\n    enabled: true\n    ingressClassName: nginx\n    hosts: [grafana.mario.local]\n\nprometheus:\n  ingress:\n    enabled: true\n    ingressClassName: nginx\n    hosts: [prometheus.mario.local]\n  prometheusSpec:\n    serviceMonitorSelectorNilUsesHelmValues: false\n    podMonitorSelectorNilUsesHelmValues: false\n    serviceMonitorNamespaceSelector: {}\n    podMonitorNamespaceSelector: {}\n\nalertmanager:\n  enabled: true\n  ingress:\n    enabled: true\n    ingressClassName: nginx\n    hosts: [alertmanager.mario.local]\n  alertmanagerSpec:\n    replicas: 1 \n    storage:\n      volumeClaimTemplate:\n        spec:\n          storageClassName: standard\n          accessModes: [\"ReadWriteOnce\"]\n          resources:\n            requests:\n              storage: 1Gi\n"
 secrets:
   - namespace: monitoring
     name: grafana-admin
