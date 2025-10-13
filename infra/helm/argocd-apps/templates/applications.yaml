@@ -30,7 +30,16 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
-      - Replace=true
+      # - Replace=true   # <-- REMOVED to avoid immutable PVC errors
+  ignoreDifferences:
+    - group: ""
+      kind: PersistentVolumeClaim
+      name: pg-data
+      jsonPointers:
+        - /spec/volumeName
+        - /spec/storageClassName
+        - /spec/dataSource
+        - /spec/dataSourceRef
 ---
 {{- end }}
 
@@ -65,15 +74,6 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
-    #  - Replace=true
-    ignoreDifferences:
-      - group: ""
-        kind: PersistentVolumeClaim
-        name: pg-data
-        jsonPointers:
-          - /spec/volumeName
-          - /spec/storageClassName
-          - /spec/dataSource
-          - /spec/dataSourceRef
+      # - Replace=true   # optional here too
 ---
 {{- end }}
