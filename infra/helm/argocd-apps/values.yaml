@@ -10,8 +10,9 @@ project:
 apps:
   - name: backend
     path: infra/helm/backend
+    repoURL: https://github.com/tAIness/devops-project1.git
     targetRevision: ""
-    tag: ""
+    chart: backend
     destinationNamespace: mario-backend
     values:
       ingress:
@@ -40,9 +41,11 @@ apps:
 
   - name: web
     path: infra/helm/web
+    repoURL: https://github.com/tAIness/devops-project1.git
     destinationNamespace: mario-web
     targetRevision: ""
     tag: ""
+    chart: web
     values:
       ingress:
         enabled: true
