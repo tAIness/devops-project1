@@ -1,22 +1,18 @@
-# root-apps.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: root-app
   namespace: argocd
 spec:
-  project: default                 # use the same project name you render in project.yaml
+  project: default
   destination:
     server: https://kubernetes.default.svc
     namespace: argocd
   source:
     repoURL: https://github.com/tAIness/devops-project1.git
     targetRevision: main
-    path: infra/helm/argocd-apps  # ← points to your chart folder
-    helm: {}                      # (optional) valueFiles: [...] if you use non-defaults
+    path: infra/helm/argocd-apps
+    helm: {}  # optional: you could pass values here instead of committing them
   syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
-    syncOptions:
-      - CreateNamespace=true
+    automated: { prune: true, selfHeal: true }
+    syncOptions: [ "CreateNamespace=true" ]

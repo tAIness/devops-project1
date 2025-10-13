@@ -94,6 +94,9 @@ jobs:
             echo "Updating $f to appVersion=${TAG}"
             yq -i '.appVersion = env(TAG)' "$f"
           done
+        # write global.releaseTag in argocd-apps values.yaml
+          echo "Setting global.releaseTag=${TAG} in infra/helm/argocd-apps/values.yaml"
+          yq -i '.global.releaseTag = env(TAG)' infra/helm/argocd-apps/values.yaml
 
       - name: Commit & push change
         run: |

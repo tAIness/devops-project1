@@ -2,6 +2,7 @@ global:
   argoNamespace: argocd
   repoURL: https://github.com/tAIness/devops-project1.git
   targetRevision: main
+  releaseTag: ""   # CI will set this each release
 
 project:
   enabled: true

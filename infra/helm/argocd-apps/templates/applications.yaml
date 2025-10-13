@@ -16,16 +16,28 @@ spec:
     repoURL: {{ $.Values.global.repoURL }}
     targetRevision: {{ default "main" (default $app.targetRevision $.Values.global.targetRevision) }}
     path: {{ $app.path }}
-    {{- if $app.values }}
+    {{- if or $app.helm $app.values }}
     helm:
+      {{- if $app.helm.valueFiles }}
+      valueFiles:
+{{ toYaml $app.helm.valueFiles | indent 8 }}
+      {{- end }}
+      {{- if $app.helm.values }}
+      values: |
+{{ toYaml $app.helm.values | indent 8 }}
+      {{- else if $app.values }}
       values: |
 {{ toYaml $app.values | indent 8 }}
+      {{- end }}
     {{- end }}
   info:
     - name: Release
       value: {{ default "unknown" $.Values.global.releaseTag | quote }}
     - name: Image
-      value: "{{ (dig "image" "repository" "" $app.values | default (dig "image" "repository" "" $app.helm.values)) }}:{{ default $.Values.global.releaseTag (dig "image" "tag" "" $app.values | default (dig "image" "tag" "" $app.helm.values)) }}"
+      value: >-
+        {{- $repo := (dig "image" "repository" "" $app.helm.values $app.values) -}}
+        {{- $tag  := (default $.Values.global.releaseTag (dig "image" "tag" "" $app.helm.values $app.values)) -}}
+        {{- if $repo }}{{ printf "%s:%s" $repo $tag }}{{ else }}unknown{{ end }}
   syncPolicy:
     automated: { prune: true, selfHeal: true }
     syncOptions: [ "CreateNamespace=true" ]
