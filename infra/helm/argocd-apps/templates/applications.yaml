@@ -1,3 +1,4 @@
+# applications.yaml
 {{- /* ========= In-repo apps ========= */ -}}
 {{- range $app := (.Values.apps | default (list)) }}
 apiVersion: argoproj.io/v1alpha1
@@ -61,7 +62,14 @@ spec:
     targetRevision: {{ $h.source.targetRevision }}
     helm:
       values: |
-{{ toYaml (dig "helm" "values" dict $h | default dict) | nindent 8 }}
+{{- $hv := (dig "helm" "values" nil $h) -}}
+{{- if $hv }}
+{{- if kindIs "string" $hv }}
+{{ $hv | nindent 8 }}
+{{- else }}
+{{ toYaml $hv | nindent 8 }}
+{{- end }}
+{{- end }}
   info:
     - name: Chart
       value: "{{ $h.source.chart }}@{{ $h.source.targetRevision }}"
@@ -74,6 +82,5 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
-      # - Replace=true   # optional here too
 ---
 {{- end }}

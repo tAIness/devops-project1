@@ -1,3 +1,4 @@
+# /infra/helm/monitoring/templates/ingress-nginx-metrics.yaml
 {{- if .Values.enabled }}
 apiVersion: v1
 kind: Service

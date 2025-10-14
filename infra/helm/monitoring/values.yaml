@@ -1,3 +1,4 @@
+# infra/helm/monitoring/values.yaml
 # values for monitoring-extras (no kube-prometheus-stack keys here)
 enabled: true
 
