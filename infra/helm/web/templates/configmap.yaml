@@ -13,18 +13,26 @@ data:
       sendfile      on;
       keepalive_timeout  65;
 
-      # --- upstream to backend service (full DNS so it works cross-namespace) ---
       upstream backend {
         server app-svc.mario-backend.svc.cluster.local:8000;
       }
 
       server {
         listen 80;
+        root /usr/share/nginx/html;   # <-- moved here so /images uses it too
+        index index.html;
 
-        # static SPA
+        # list the images directory (avoids 403 on /images/)
+        location /images/ {
+          autoindex on;
+          autoindex_exact_size off;
+          autoindex_localtime on;
+          try_files $uri $uri/ =404;
+        }
+
+        # SPA static files
         location / {
           try_files $uri $uri/ /index.html;
-          root /usr/share/nginx/html;
         }
 
         # health for k8s probes
