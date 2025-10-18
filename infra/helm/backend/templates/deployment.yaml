@@ -1,55 +1,90 @@
-# templates/deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: app
-  labels: { app: mario-app }
+  labels:
+    app: mario-app
 spec:
   replicas: 1
   selector:
-    matchLabels: { app: mario-app }
+    matchLabels:
+      app: mario-app
   template:
     metadata:
-      labels: { app: mario-app }
+      labels:
+        app: mario-app
     spec:
+      {{- /* Render volumes only if runtime.fixPasswd is truthy */}}
+      {{- if (default false (get (default (dict) .Values.runtime) "fixPasswd")) }}
+      volumes:
+        - name: etc-passwd
+          emptyDir: {}
+      {{- end }}
+
       initContainers:
+        {{- if (default false (get (default (dict) .Values.runtime) "fixPasswd")) }}
+        - name: fix-passwd
+          image: busybox:1.36
+          command: ["/bin/sh","-lc"]
+          args:
+            - |
+              cp /etc/passwd /work/passwd
+              if ! awk -F: '$$3==1000{found=1} END{exit !found}' /work/passwd ; then
+                echo 'appuser:x:1000:1000:appuser:/data:/sbin/nologin' >> /work/passwd
+              fi
+              ls -l /work; tail -n +1 /work/passwd
+          volumeMounts:
+            - name: etc-passwd
+              mountPath: /work
+        {{- end }}
         - name: wait-for-db
           image: postgres:15
           command: ["/bin/sh","-c"]
           args:
             - |
               set -eu
-              HOST="db.mario-backend.svc.cluster.local"
-              until pg_isready -h "$HOST" -p 5432 -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do
+              HOST="{{ .Values.db.service.name | default "db" }}.{{ .Release.Namespace }}.svc.cluster.local"
+              PORT="{{ .Values.db.service.port | default 5432 }}"
+              until pg_isready -h "$HOST" -p "$PORT" -U "$POSTGRES_USER" -d "$POSTGRES_DB"; do
                 echo "postgres not ready yet..."; sleep 2
               done
           env:
             - name: POSTGRES_USER
               valueFrom:
-                 secretKeyRef:
-                   name: {{ .Values.db.secrets.credsName | default "db-secrets" }}
-                   key: POSTGRES_USER
+                secretKeyRef:
+                  name: {{ .Values.db.secrets.credsName | default "db-secrets" }}
+                  key: POSTGRES_USER
             - name: POSTGRES_DB
               valueFrom:
-                 secretKeyRef:
-                   name: {{ .Values.db.secrets.credsName | default "db-secrets" }}
-                   key: POSTGRES_DB
+                secretKeyRef:
+                  name: {{ .Values.db.secrets.credsName | default "db-secrets" }}
+                  key: POSTGRES_DB
+
       containers:
         - name: app
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          ports: [{ name: http, containerPort: {{ .Values.service.port }} }]
+          ports:
+            - name: http
+              containerPort: {{ .Values.service.port }}
           env:
             - name: DATABASE_URL
-              valueFrom: { secretKeyRef: { name: db-conn, key: url } }
+              valueFrom:
+                secretKeyRef:
+                  name: db-conn
+                  key: url
             - name: PORT
               value: "{{ .Values.service.port }}"
           readinessProbe:
-            httpGet: { path: /health, port: {{ .Values.service.port }} }
+            httpGet:
+              path: /health
+              port: {{ .Values.service.port }}
             initialDelaySeconds: 5
             periodSeconds: 5
           livenessProbe:
-            httpGet: { path: /health, port: {{ .Values.service.port }} }
+            httpGet:
+              path: /health
+              port: {{ .Values.service.port }}
             initialDelaySeconds: 20
             periodSeconds: 10
           securityContext:
@@ -57,3 +92,10 @@ spec:
             runAsUser: 1000
             runAsGroup: 1000
             allowPrivilegeEscalation: false
+          {{- if (default false (get (default (dict) .Values.runtime) "fixPasswd")) }}
+          volumeMounts:
+            - name: etc-passwd
+              mountPath: /etc/passwd
+              subPath: passwd
+              readOnly: true
+          {{- end }}
