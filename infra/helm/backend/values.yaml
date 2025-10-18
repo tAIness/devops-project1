@@ -13,14 +13,17 @@ ingress:
 
 secrets:
   # prevent Argo “RepeatedResourceWarning” by default
-  createDbConn: false
-  createDbCreds: false
+  createDbConn: true
+  createDbCreds: true
   dbConn:
     url: ""                 # set only if createDbConn=true
   dbCreds:
-    POSTGRES_DB: ""
-    POSTGRES_USER: ""
-    POSTGRES_PASSWORD: ""
+    POSTGRES_DB: mario
+    POSTGRES_USER: mario
+    POSTGRES_PASSWORD: mario123
+
+runtime:
+  fixPasswd: false  # set true only if you still need the passwd overlay
 
 autoscaling:
   mode: none                # one of: none | hpa | keda
