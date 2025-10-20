@@ -1,20 +1,24 @@
+{{- $name := default .Chart.Name .Values.nameOverride -}}
+{{- $fullname := (.Values.fullnameOverride | default (printf "%s-%s" .Release.Name $name)) | trunc 63 | trimSuffix "-" -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: app
+  name: {{ $fullname }}
   labels:
-    app: mario-app
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: mario-app
+      app.kubernetes.io/name: {{ $name }}
+      app.kubernetes.io/instance: {{ .Release.Name }}
   template:
     metadata:
       labels:
-        app: mario-app
+        app.kubernetes.io/name: {{ $name }}
+        app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
-      {{- /* Render volumes only if runtime.fixPasswd is truthy */}}
       {{- if (default false (get (default (dict) .Values.runtime) "fixPasswd")) }}
       volumes:
         - name: etc-passwd
@@ -92,6 +96,10 @@ spec:
             runAsUser: 1000
             runAsGroup: 1000
             allowPrivilegeEscalation: false
+          resources:
+            requests:
+              cpu: "100m"
+              memory: "128Mi"
           {{- if (default false (get (default (dict) .Values.runtime) "fixPasswd")) }}
           volumeMounts:
             - name: etc-passwd
