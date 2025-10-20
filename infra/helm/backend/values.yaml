@@ -29,7 +29,7 @@ runtime:
   fixPasswd: false  # set true only if you still need the passwd overlay
 
 autoscaling:
-  mode: keda                # one of: none | hpa | keda
+  mode: hpa                # one of: none | hpa | keda
 
   hpa:
     minReplicas: 1
