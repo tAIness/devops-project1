@@ -1,15 +1,22 @@
+{{- /* inline fullname */ -}}
+{{- $name := default .Chart.Name .Values.nameOverride -}}
+{{- $fullname := (.Values.fullnameOverride | default (printf "%s-%s" .Release.Name $name)) | trunc 63 | trimSuffix "-" -}}
+
 {{- if and (eq (.Values.autoscaling.mode | default "none") "hpa") .Values.autoscaling.hpa }}
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: {{ include "backend.fullname" . }}
+  name: {{ $fullname }}
   labels:
-    {{- include "backend.labels" . | nindent 4 }}
+    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/instance: {{ .Release.Name }}
+    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
+    app.kubernetes.io/managed-by: {{ .Release.Service }}
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: {{ include "backend.fullname" . }}
+    name: {{ $fullname }}
   minReplicas: {{ .Values.autoscaling.hpa.minReplicas | default 1 }}
   maxReplicas: {{ .Values.autoscaling.hpa.maxReplicas | default 3 }}
   metrics:
