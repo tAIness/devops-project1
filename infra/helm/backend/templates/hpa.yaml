@@ -1,14 +1,15 @@
-{{- if eq (default "none" .Values.autoscaling.mode) "hpa" }}
+{{- if and (eq (.Values.autoscaling.mode | default "none") "hpa") .Values.autoscaling.hpa }}
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
   name: {{ include "backend.fullname" . }}
-  namespace: {{ .Release.Namespace }}
+  labels:
+    {{- include "backend.labels" . | nindent 4 }}
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: {{ include "backend.fullname" . | default "app" }}
+    name: {{ include "backend.fullname" . }}
   minReplicas: {{ .Values.autoscaling.hpa.minReplicas | default 1 }}
   maxReplicas: {{ .Values.autoscaling.hpa.maxReplicas | default 3 }}
   metrics:
