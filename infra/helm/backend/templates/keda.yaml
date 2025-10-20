@@ -1,0 +1,12 @@
+{{- if and (eq (default "none" .Values.autoscaling.mode) "keda") (.Values.autoscaling.keda.auths) }}
+{{- range .Values.autoscaling.keda.auths }}
+apiVersion: keda.sh/v1alpha1
+kind: TriggerAuthentication
+metadata:
+  name: {{ .name }}
+  namespace: {{ $.Release.Namespace }}
+spec:
+{{ toYaml .spec | indent 2 }}
+---
+{{- end }}
+{{- end }}
