@@ -26,8 +26,8 @@ runtime:
   fixPasswd: false  # set true only if you still need the passwd overlay
 
 autoscaling:
-  mode: keda                # one of: none | hpa | keda
-  fullnameOverride: "app" 
+  mode: none                # one of: none | hpa | keda
+  fullnameOverride: "app"
   hpa:
     minReplicas: 1
     maxReplicas: 3
