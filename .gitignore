@@ -33,3 +33,13 @@ infra/k8s/**/**/*.key
 infra/k8s/**/**/*.pem
 infra/k8s/**/**/*.p12
 infra/k8s/**/**/*.pfx
+
+# mac release flow (local-only secrets)
+mac-release-flow/.env.local
+mac-release-flow/.DS_Store
+
+# docker noise
+**/.env  # only if you don't intentionally commit .env files elsewhere
+**/.DS_Store
+
+
