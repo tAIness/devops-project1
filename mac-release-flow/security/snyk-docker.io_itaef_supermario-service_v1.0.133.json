@@ -1,0 +1,332 @@
+{
+  "vulnerabilities": [],
+  "ok": true,
+  "dependencyCount": 110,
+  "org": "inesstaef",
+  "policy": "# Snyk (https://snyk.io) policy file, patches or ignores known vulnerabilities.\nversion: v1.25.1\nignore: {}\npatch: {}\n",
+  "isPrivate": true,
+  "licensesPolicy": {
+    "severities": {},
+    "orgLicenseRules": {
+      "AGPL-1.0": {
+        "licenseType": "AGPL-1.0",
+        "severity": "high",
+        "instructions": ""
+      },
+      "AGPL-3.0": {
+        "licenseType": "AGPL-3.0",
+        "severity": "high",
+        "instructions": ""
+      },
+      "Artistic-1.0": {
+        "licenseType": "Artistic-1.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "Artistic-2.0": {
+        "licenseType": "Artistic-2.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "CDDL-1.0": {
+        "licenseType": "CDDL-1.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "CPOL-1.02": {
+        "licenseType": "CPOL-1.02",
+        "severity": "high",
+        "instructions": ""
+      },
+      "EPL-1.0": {
+        "licenseType": "EPL-1.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "GPL-2.0": {
+        "licenseType": "GPL-2.0",
+        "severity": "high",
+        "instructions": ""
+      },
+      "GPL-3.0": {
+        "licenseType": "GPL-3.0",
+        "severity": "high",
+        "instructions": ""
+      },
+      "LGPL-2.0": {
+        "licenseType": "LGPL-2.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "LGPL-2.1": {
+        "licenseType": "LGPL-2.1",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "LGPL-3.0": {
+        "licenseType": "LGPL-3.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "MPL-1.1": {
+        "licenseType": "MPL-1.1",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "MPL-2.0": {
+        "licenseType": "MPL-2.0",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "MS-RL": {
+        "licenseType": "MS-RL",
+        "severity": "medium",
+        "instructions": ""
+      },
+      "SimPL-2.0": {
+        "licenseType": "SimPL-2.0",
+        "severity": "high",
+        "instructions": ""
+      }
+    }
+  },
+  "packageManager": "deb",
+  "ignoreSettings": {
+    "adminOnly": false,
+    "reasonRequired": false,
+    "disregardFilesystemIgnores": false
+  },
+  "docker": {
+    "os": {
+      "prettyName": "Debian GNU/Linux 13 (trixie)"
+    }
+  },
+  "summary": "No known operating system vulnerabilities",
+  "severityThreshold": "high",
+  "filesystemPolicy": false,
+  "uniqueCount": 0,
+  "projectName": "docker-image|docker.io/itaef/supermario-service",
+  "platform": "linux/arm64",
+  "hasUnknownVersions": false,
+  "path": "docker.io/itaef/supermario-service:v1.0.133/itaef/supermario-service",
+  "applications": [
+    {
+      "vulnerabilities": [],
+      "ok": true,
+      "dependencyCount": 10,
+      "org": "inesstaef",
+      "policy": "# Snyk (https://snyk.io) policy file, patches or ignores known vulnerabilities.\nversion: v1.25.1\nignore: {}\npatch: {}\n",
+      "isPrivate": true,
+      "licensesPolicy": {
+        "severities": {},
+        "orgLicenseRules": {
+          "AGPL-1.0": {
+            "licenseType": "AGPL-1.0",
+            "severity": "high",
+            "instructions": ""
+          },
+          "AGPL-3.0": {
+            "licenseType": "AGPL-3.0",
+            "severity": "high",
+            "instructions": ""
+          },
+          "Artistic-1.0": {
+            "licenseType": "Artistic-1.0",
+            "severity": "medium",
+            "instructions": ""
+          },
+          "Artistic-2.0": {
+            "licenseType": "Artistic-2.0",
+            "severity": "medium",
+            "instructions": ""
+          },
+          "CDDL-1.0": {
+            "licenseType": "CDDL-1.0",
+            "severity": "medium",
+            "instructions": ""
+          },
+          "CPOL-1.02": {
+            "licenseType": "CPOL-1.02",
+            "severity": "high",
+            "instructions": ""
+          },
+          "EPL-1.0": {
+            "licenseType": "EPL-1.0",
+            "severity": "medium",
+            "instructions": ""
+          },
+          "GPL-2.0": {
+            "licenseType": "GPL-2.0",
+            "severity": "high",
+            "instructions": ""
+          },
+          "GPL-3.0": {
+            "licenseType": "GPL-3.0",
+            "severity": "high",
+            "instructions": ""
+          },
+          "LGPL-2.0": {
+            "licenseType": "LGPL-2.0",
+            "severity": "medium",
+            "instructions": ""
+          },
+          "LGPL-2.1": {
+            "licenseType": "LGPL-2.1",
+            "severity": "medium",
+            "instructions": ""
+          },
+          "LGPL-3.0": {
+            "licenseType": "LGPL-3.0",
+            "severity": "medium",
+            "instructions": ""
+          },
+          "MPL-1.1": {
+            "licenseType": "MPL-1.1",
+            "severity": "medium",
+            "instructions": ""
+          },
+          "MPL-2.0": {
+            "licenseType": "MPL-2.0",
+            "severity": "medium",
+            "instructions": ""
+          },
+          "MS-RL": {
+            "licenseType": "MS-RL",
+            "severity": "medium",
+            "instructions": ""
+          },
+          "SimPL-2.0": {
+            "licenseType": "SimPL-2.0",
+            "severity": "high",
+            "instructions": ""
+          }
+        }
+      },
+      "packageManager": "pip",
+      "ignoreSettings": {
+        "adminOnly": false,
+        "reasonRequired": false,
+        "disregardFilesystemIgnores": false
+      },
+      "docker": {},
+      "summary": "No high or critical severity vulnerabilities",
+      "severityThreshold": "high",
+      "filesystemPolicy": false,
+      "uniqueCount": 0,
+      "targetFile": "/app/requirements.txt",
+      "projectName": "/app/requirements.txt",
+      "displayTargetFile": "/app/requirements.txt",
+      "hasUnknownVersions": false,
+      "path": "docker.io/itaef/supermario-service:v1.0.133/app/requirements.txt"
+    },
+    {
+      "vulnerabilities": [],
+      "ok": true,
+      "dependencyCount": 1,
+      "org": "inesstaef",
+      "policy": "# Snyk (https://snyk.io) policy file, patches or ignores known vulnerabilities.\nversion: v1.25.1\nignore: {}\npatch: {}\n",
+      "isPrivate": true,
+      "licensesPolicy": {
+        "severities": {},
+        "orgLicenseRules": {
+          "AGPL-1.0": {
+            "licenseType": "AGPL-1.0",
+            "severity": "high",
+            "instructions": ""
+          },
+          "AGPL-3.0": {
+            "licenseType": "AGPL-3.0",
+            "severity": "high",
+            "instructions": ""
+          },
+          "Artistic-1.0": {
+            "licenseType": "Artistic-1.0",
+            "severity": "medium",
+            "instructions": ""
+          },
+          "Artistic-2.0": {
+            "licenseType": "Artistic-2.0",
+            "severity": "medium",
+            "instructions": ""
+          },
+          "CDDL-1.0": {
+            "licenseType": "CDDL-1.0",
+            "severity": "medium",
+            "instructions": ""
+          },
+          "CPOL-1.02": {
+            "licenseType": "CPOL-1.02",
+            "severity": "high",
+            "instructions": ""
+          },
+          "EPL-1.0": {
+            "licenseType": "EPL-1.0",
+            "severity": "medium",
+            "instructions": ""
+          },
+          "GPL-2.0": {
+            "licenseType": "GPL-2.0",
+            "severity": "high",
+            "instructions": ""
+          },
+          "GPL-3.0": {
+            "licenseType": "GPL-3.0",
+            "severity": "high",
+            "instructions": ""
+          },
+          "LGPL-2.0": {
+            "licenseType": "LGPL-2.0",
+            "severity": "medium",
+            "instructions": ""
+          },
+          "LGPL-2.1": {
+            "licenseType": "LGPL-2.1",
+            "severity": "medium",
+            "instructions": ""
+          },
+          "LGPL-3.0": {
+            "licenseType": "LGPL-3.0",
+            "severity": "medium",
+            "instructions": ""
+          },
+          "MPL-1.1": {
+            "licenseType": "MPL-1.1",
+            "severity": "medium",
+            "instructions": ""
+          },
+          "MPL-2.0": {
+            "licenseType": "MPL-2.0",
+            "severity": "medium",
+            "instructions": ""
+          },
+          "MS-RL": {
+            "licenseType": "MS-RL",
+            "severity": "medium",
+            "instructions": ""
+          },
+          "SimPL-2.0": {
+            "licenseType": "SimPL-2.0",
+            "severity": "high",
+            "instructions": ""
+          }
+        }
+      },
+      "packageManager": "pip",
+      "ignoreSettings": {
+        "adminOnly": false,
+        "reasonRequired": false,
+        "disregardFilesystemIgnores": false
+      },
+      "docker": {},
+      "summary": "No high or critical severity vulnerabilities",
+      "severityThreshold": "high",
+      "filesystemPolicy": false,
+      "uniqueCount": 0,
+      "targetFile": "/app/tests/requirements.txt",
+      "projectName": "/app/tests/requirements.txt",
+      "displayTargetFile": "/app/tests/requirements.txt",
+      "hasUnknownVersions": false,
+      "path": "docker.io/itaef/supermario-service:v1.0.133/app/tests/requirements.txt"
+    }
+  ]
+}
