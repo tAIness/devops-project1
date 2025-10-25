@@ -527,7 +527,7 @@ jobs:
   # ----------------------------------------------------------
   deploy-mac:
     name: Deploy on Mac (self-hosted)
-    runs-on: [self-hosted, mac]
+    runs-on: [self-hosted, macOS]
     needs: [resolve-target, setup, build-and-push-app, build-and-push-web, snyk-release, create-tag]
     if: ${{ needs.resolve-target.outputs.target == 'mac' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
     env:
