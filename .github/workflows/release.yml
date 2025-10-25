@@ -23,9 +23,6 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ------------------------------------------------------------
-  # Resolve deploy target once (input > org/repo var > default)
-  # ------------------------------------------------------------
   resolve-target:
     name: Resolve deploy target
     runs-on: ubuntu-latest
@@ -41,9 +38,21 @@ jobs:
           echo "target=$tgt" >> "$GITHUB_OUTPUT"
           echo "Deploy target resolved to: $tgt"
 
-  # ----------------------------------------------------------
-  # Tag computation: continue v*.*.* series (patch bumps)
-  # ----------------------------------------------------------
+  resolve-registry:
+    name: Resolve deploy registry
+    runs-on: ubuntu-latest
+    outputs:
+      registry: ${{ steps.out.outputs.registry }}
+    steps:
+      - id: out
+        shell: bash
+        run: |
+          sec="${{ secrets.DEPLOY_REGISTRY }}"
+          var="${{ vars.DEPLOY_REGISTRY }}"
+          reg="${sec:-${var:-hub}}"
+          echo "registry=$reg" >> "$GITHUB_OUTPUT"
+          echo "Deploy registry resolved to: $reg"
+
   compute-tag:
     name: Compute next tag (when pushing to main)
     runs-on: ubuntu-latest
@@ -68,11 +77,7 @@ jobs:
             patch=$((10#$patch + 1))
           fi
           echo "tag=v${major}.${minor}.${patch}" >> "$GITHUB_OUTPUT"
-          echo "Next tag: v${major}.${minor}.${patch}"
 
-  # ----------------------------------------------------------
-  # Decide IMAGE_TAG: either pushed tag or computed next
-  # ----------------------------------------------------------
   setup:
     name: Resolve image tag
     runs-on: ubuntu-latest
@@ -90,9 +95,6 @@ jobs:
             echo "IMAGE_TAG=${{ needs.compute-tag.outputs.tag }}" >> "$GITHUB_OUTPUT"
           fi
 
-  # ----------------------------------------------------------
-  # Bump helm appVersions on main
-  # ----------------------------------------------------------
   bump-helm-appversion:
     name: Bump Helm appVersion in all charts & push
     runs-on: ubuntu-latest
@@ -111,20 +113,15 @@ jobs:
           case "$ARCH" in x86_64) ARCH=amd64;; aarch64|arm64) ARCH=arm64;; esac
           curl -fsSL -o /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_${OS}_${ARCH}"
           chmod +x /usr/local/bin/yq
-          yq --version
       - name: Update appVersion for ALL charts + write releaseTag
         shell: bash
         run: |
           set -euo pipefail
           mapfile -t charts < <(git ls-files 'infra/helm/**/Chart.yaml')
-          if (( ${#charts[@]} == 0 )); then
-            echo "No Chart.yaml found under infra/helm"; exit 1
-          fi
+          (( ${#charts[@]} )) || { echo "No Chart.yaml under infra/helm"; exit 1; }
           for f in "${charts[@]}"; do
-            echo "Updating $f to appVersion=${TAG}"
             yq -i '.appVersion = env(TAG)' "$f"
           done
-          echo "Setting global.releaseTag=${TAG} in infra/helm/argocd-apps/values.yaml"
           yq -i '.global.releaseTag = env(TAG)' infra/helm/argocd-apps/values.yaml
       - name: Commit & push change
         run: |
@@ -167,9 +164,6 @@ jobs:
             git push origin "$TAG"
           fi
 
-  # ----------------------------------------------------------
-  # Build & push APP image (multi-arch)
-  # ----------------------------------------------------------
   build-and-push-app:
     name: Build & push app image
     runs-on: ubuntu-latest
@@ -178,7 +172,7 @@ jobs:
       IMAGE_TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-      DOCKERHUB_REPO_APP: ${{ secrets.DOCKERHUB_REPO_APP }}
+      DOCKERHUB_REPO_APP: ${{ vars.DOCKERHUB_REPO_APP }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -196,9 +190,6 @@ jobs:
           push: true
           tags: ${{ env.DOCKERHUB_REPO_APP }}:${{ env.IMAGE_TAG }}
 
-  # ----------------------------------------------------------
-  # Build & push WEB image (multi-arch)
-  # ----------------------------------------------------------
   build-and-push-web:
     name: Build & push web image
     runs-on: ubuntu-latest
@@ -207,7 +198,7 @@ jobs:
       IMAGE_TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-      DOCKERHUB_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}
+      DOCKERHUB_REPO_WEB: ${{ vars.DOCKERHUB_REPO_WEB }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -225,9 +216,6 @@ jobs:
           push: true
           tags: ${{ env.DOCKERHUB_REPO_WEB }}:${{ env.IMAGE_TAG }}
 
-  # ----------------------------------------------------------
-  # Snyk (mandatory)
-  # ----------------------------------------------------------
   snyk-release:
     name: Snyk scan of images
     runs-on: ubuntu-latest
@@ -235,8 +223,8 @@ jobs:
     env:
       IMAGE_TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-      DOCKERHUB_REPO_APP: ${{ secrets.DOCKERHUB_REPO_APP }}
-      DOCKERHUB_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}
+      DOCKERHUB_REPO_APP: ${{ vars.DOCKERHUB_REPO_APP }}
+      DOCKERHUB_REPO_WEB: ${{ vars.DOCKERHUB_REPO_WEB }}
     steps:
       - uses: actions/checkout@v4
       - uses: snyk/actions/setup@0.4.0
@@ -285,108 +273,133 @@ jobs:
           echo "Blocking release: Snyk found issues above threshold."
           exit 1
 
-  # ----------------------------------------------------------
-  # Deploy to EC2 (only when target == ec2)
-  # ----------------------------------------------------------
-  deploy-ec2:
-    name: Deploy to EC2
-    runs-on: ubuntu-latest
-    needs: [resolve-target, setup, build-and-push-app, build-and-push-web, snyk-release, create-tag]
-    if: ${{ needs.resolve-target.outputs.target == 'ec2' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
-    steps:
-      - run: echo "EC2 flow is currently disabled; using Mac until EC2 is back."
-
-  # ----------------------------------------------------------
-  # Deploy to Mac (self-hosted) + mirror APP & WEB to local Nexus
-  # ----------------------------------------------------------
-  deploy-mac:
-    name: Deploy on Mac (self-hosted)
+  # Publish to **both** registries: this mirrors Hub -> Nexus on the Mac
+  mirror-to-nexus:
+    name: Mirror APP & WEB to Nexus (Mac)
     runs-on: [self-hosted, macOS]
     needs: [resolve-target, setup, build-and-push-app, build-and-push-web, snyk-release, create-tag]
     if: ${{ needs.resolve-target.outputs.target == 'mac' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
     env:
       TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
-      # Docker Hub
-      DOCKERHUB_REPO_APP: ${{ secrets.DOCKERHUB_REPO_APP }}
-      DOCKERHUB_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}
+      DOCKERHUB_REPO_APP: ${{ vars.DOCKERHUB_REPO_APP }}
+      DOCKERHUB_REPO_WEB: ${{ vars.DOCKERHUB_REPO_WEB }}
       DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
       DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-      # DB & app config
+      NEXUS_DOMAIN: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}   # e.g. 127.0.0.1:5000
+      NEXUS_USER: ${{ secrets.NEXUS_USERNAME }}
+      NEXUS_PASS: ${{ secrets.NEXUS_PASSWORD }}
+      NEXUS_REPO_APP: ${{ secrets.NEXUS_REPO_APP }}        # e.g. supermario-service
+      NEXUS_REPO_WEB: ${{ secrets.NEXUS_REPO_WEB }}        # e.g. supermario-front
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install skopeo (macOS)
+        run: |
+          if ! command -v skopeo >/dev/null 2>&1; then
+            brew update
+            brew install skopeo
+          fi
+      - name: Mirror APP manifest-list to Nexus
+        run: |
+          set -euo pipefail
+          SRC="docker://${DOCKERHUB_REPO_APP}:${TAG}"
+          DST="docker://${NEXUS_DOMAIN}/${NEXUS_REPO_APP}:${TAG}"
+          skopeo copy --all --override-os linux \
+            --src-creds "${DH_USER}:${DH_TOKEN}" \
+            --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
+            --src-tls-verify=true --dest-tls-verify=false \
+            "${SRC}" "${DST}"
+          skopeo copy --all --override-os linux \
+            --src-creds "${DH_USER}:${DH_TOKEN}" \
+            --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
+            --src-tls-verify=true --dest-tls-verify=false \
+            "${SRC}" "docker://${NEXUS_DOMAIN}/${NEXUS_REPO_APP}:latest"
+      - name: Mirror WEB manifest-list to Nexus
+        run: |
+          set -euo pipefail
+          SRC="docker://${DOCKERHUB_REPO_WEB}:${TAG}"
+          DST="docker://${NEXUS_DOMAIN}/${NEXUS_REPO_WEB}:${TAG}"
+          skopeo copy --all --override-os linux \
+            --src-creds "${DH_USER}:${DH_TOKEN}" \
+            --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
+            --src-tls-verify=true --dest-tls-verify=false \
+            "${SRC}" "${DST}"
+          skopeo copy --all --override-os linux \
+            --src-creds "${DH_USER}:${DH_TOKEN}" \
+            --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
+            --src-tls-verify=true --dest-tls-verify=false \
+            "${SRC}" "docker://${NEXUS_DOMAIN}/${NEXUS_REPO_WEB}:latest"
+
+  deploy-ec2:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: [resolve-target, resolve-registry, setup, build-and-push-app, build-and-push-web, snyk-release, create-tag]
+    if: ${{ needs.resolve-target.outputs.target == 'ec2' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
+    steps:
+      - run: echo "EC2 flow currently disabled; target=ec2 would run here."
+
+  # Deploy ONE stack on Mac (default: pull from Hub; set DEPLOY_REGISTRY=nexus to pull from Nexus instead)
+  # If you *really* want two stacks at once, duplicate this job with a different COMPOSE_PROJECT_NAME and different repos.
+  deploy-mac:
+    name: Deploy on Mac (self-hosted)
+    runs-on: [self-hosted, macOS]
+    needs: [resolve-target, resolve-registry, setup, build-and-push-app, build-and-push-web, snyk-release, create-tag, mirror-to-nexus]
+    if: ${{ needs.resolve-target.outputs.target == 'mac' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
+    env:
+      TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
+      # Hub
+      HUB_APP: ${{ vars.DOCKERHUB_REPO_APP }}
+      HUB_WEB: ${{ vars.DOCKERHUB_REPO_WEB }}
+      DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+      DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      # Nexus
+      REGISTRY_KIND: ${{ needs.resolve-registry.outputs.registry }}   # hub|nexus
+      NEXUS_DOMAIN: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}
+      NEXUS_APP: ${{ secrets.NEXUS_REPO_APP }}
+      NEXUS_WEB: ${{ secrets.NEXUS_REPO_WEB }}
+      # DB/app
       DB_NAME: ${{ vars.DB_NAME }}
       DB_USER: ${{ vars.DB_USER }}
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
       DB_PORT: ${{ vars.DB_PORT }}
       FLASK_PORT: ${{ vars.FLASK_PORT }}
-      # Nexus (local on Mac)
-      DEPLOY_REGISTRY: ${{ secrets.DEPLOY_REGISTRY }}     # 'nexus' to enable mirroring/using Nexus
-      NEXUS_DOMAIN: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}  # e.g. 127.0.0.1:5000
-      NEXUS_USER: ${{ secrets.NEXUS_USERNAME }}
-      NEXUS_PASS: ${{ secrets.NEXUS_PASSWORD }}
-      NEXUS_REPO_APP: ${{ secrets.NEXUS_REPO_APP }}       # e.g. supermario-service
-      NEXUS_REPO_WEB: ${{ secrets.NEXUS_REPO_WEB }}       # e.g. supermario-front
     steps:
       - uses: actions/checkout@v4
 
-      - name: Ensure docker login to Hub (pull fallback)
-        if: ${{ env.DH_USER != '' && env.DH_TOKEN != '' }}
-        run: echo "${DH_TOKEN}" | docker login -u "${DH_USER}" --password-stdin
-
-      - name: Mirror APP & WEB to local Nexus (on Mac runner)
-        if: ${{ env.DEPLOY_REGISTRY == 'nexus' }}
+      - name: Choose image repositories (Hub vs Nexus)
+        id: repos
         shell: bash
         run: |
           set -euo pipefail
-          # Install skopeo on the Mac runner
-          if ! command -v skopeo >/dev/null 2>&1; then
-            brew update
-            brew install skopeo
-          fi
-
-          SRC_APP="docker://${DOCKERHUB_REPO_APP}:${TAG}"
-          SRC_WEB="docker://${DOCKERHUB_REPO_WEB}:${TAG}"
-          DST_APP="docker://${NEXUS_DOMAIN}/${NEXUS_REPO_APP}:${TAG}"
-          DST_WEB="docker://${NEXUS_DOMAIN}/${NEXUS_REPO_WEB}:${TAG}"
-
-          echo "Mirroring ${SRC_APP} -> ${DST_APP}"
-          skopeo copy \
-            --src-creds "${DH_USER}:${DH_TOKEN}" \
-            --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
-            --src-tls-verify=true --dest-tls-verify=false \
-            "${SRC_APP}" "${DST_APP}"
-
-          echo "Mirroring ${SRC_WEB} -> ${DST_WEB}"
-          skopeo copy \
-            --src-creds "${DH_USER}:${DH_TOKEN}" \
-            --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
-            --src-tls-verify=true --dest-tls-verify=false \
-            "${SRC_WEB}" "${DST_WEB}"
-
-          # Also tag 'latest' in Nexus (optional)
-          skopeo copy \
-            --src-creds "${DH_USER}:${DH_TOKEN}" \
-            --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
-            --src-tls-verify=true --dest-tls-verify=false \
-            "${SRC_APP}" "docker://${NEXUS_DOMAIN}/${NEXUS_REPO_APP}:latest"
-          skopeo copy \
-            --src-creds "${DH_USER}:${DH_TOKEN}" \
-            --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
-            --src-tls-verify=true --dest-tls-verify=false \
-            "${SRC_WEB}" "docker://${NEXUS_DOMAIN}/${NEXUS_REPO_WEB}:latest"
-
-      - name: Write .env.local for local compose (point to Nexus or Hub)
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p mac-release-flow
-
-          if [[ "${DEPLOY_REGISTRY:-hub}" == "nexus" ]]; then
-            APP_REPO="${NEXUS_DOMAIN}/${NEXUS_REPO_APP}"
-            WEB_REPO="${NEXUS_DOMAIN}/${NEXUS_REPO_WEB}"
+          if [[ "${REGISTRY_KIND}" == "nexus" ]]; then
+            APP_REPO="${NEXUS_DOMAIN}/${NEXUS_APP}"
+            WEB_REPO="${NEXUS_DOMAIN}/${NEXUS_WEB}"
           else
-            APP_REPO="${DOCKERHUB_REPO_APP}"
-            WEB_REPO="${DOCKERHUB_REPO_WEB}"
+            APP_REPO="${HUB_APP}"
+            WEB_REPO="${HUB_WEB}"
           fi
+          {
+            echo "APP_REPO=$APP_REPO"
+            echo "WEB_REPO=$WEB_REPO"
+          } | tee repos.env
+          echo "app_repo=$APP_REPO" >> "$GITHUB_OUTPUT"
+          echo "web_repo=$WEB_REPO" >> "$GITHUB_OUTPUT"
 
+      - name: Docker login (Hub and Nexus)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -n "${DH_USER}" && -n "${DH_TOKEN}" ]]; then
+            echo "${DH_TOKEN}" | docker login -u "${DH_USER}" --password-stdin || true
+          fi
+          # login to Nexus too so pulls work if REGISTRY_KIND=nexus
+          echo "${{ secrets.NEXUS_PASSWORD }}" | docker login "${NEXUS_DOMAIN}" -u "${{ secrets.NEXUS_USERNAME }}" --password-stdin || true
+
+      - name: Write .env.local for local compose
+        shell: bash
+        run: |
+          set -euo pipefail
+          source repos.env
+          mkdir -p mac-release-flow
           cat > mac-release-flow/.env.local <<EOF
           DOCKERHUB_REPO_APP=${APP_REPO}
           DOCKERHUB_REPO_WEB=${WEB_REPO}
@@ -397,14 +410,12 @@ jobs:
           DB_PORT=${DB_PORT}
           FLASK_PORT=${FLASK_PORT}
           EOF
-          echo "==== mac-release-flow/.env.local ===="
           cat mac-release-flow/.env.local
 
       - name: Ensure volume & best-effort pulls
         run: |
+          source repos.env
           docker volume create supermario_db_data >/dev/null
-          APP_REPO="$(grep '^DOCKERHUB_REPO_APP=' mac-release-flow/.env.local | cut -d= -f2)"
-          WEB_REPO="$(grep '^DOCKERHUB_REPO_WEB=' mac-release-flow/.env.local | cut -d= -f2)"
           docker pull "${APP_REPO}:${TAG}" || true
           docker pull "${WEB_REPO}:${TAG}" || true
 
@@ -413,13 +424,11 @@ jobs:
           docker compose -f mac-release-flow/deploy/compose.local.yml up -d --no-build
           docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 
-  # ----------------------------------------------------------
-  # Slack notification (always)
-  # ----------------------------------------------------------
   notify-slack:
     if: ${{ always() }}
     needs:
       - resolve-target
+      - resolve-registry
       - compute-tag
       - setup
       - bump-helm-appversion
@@ -427,13 +436,14 @@ jobs:
       - build-and-push-app
       - build-and-push-web
       - snyk-release
+      - mirror-to-nexus
       - deploy-ec2
       - deploy-mac
     uses: tAIness/devops-ci-lib/.github/workflows/slack-notify.yml@main
     secrets: inherit
     with:
       title: "Release: ${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
-      status: ${{ (needs['build-and-push-app'].result == 'failure' || needs['build-and-push-web'].result == 'failure' || needs['snyk-release'].result == 'failure' || (needs.resolve-target.outputs.target == 'ec2' && needs['deploy-ec2'].result == 'failure') || (needs.resolve-target.outputs.target == 'mac' && needs['deploy-mac'].result == 'failure')) && 'failure' || 'success' }}
+      status: ${{ (needs['build-and-push-app'].result == 'failure' || needs['build-and-push-web'].result == 'failure' || needs['snyk-release'].result == 'failure' || (needs.resolve-target.outputs.target == 'mac' && (needs['mirror-to-nexus'].result == 'failure' || needs['deploy-mac'].result == 'failure')) || (needs.resolve-target.outputs.target == 'ec2' && needs['deploy-ec2'].result == 'failure')) && 'failure' || 'success' }}
       only_on: "always"
       run_url: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       message: "Actor: @${{ github.actor }} · Ref: ${{ github.ref_name }}"
