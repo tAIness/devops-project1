@@ -344,7 +344,7 @@ jobs:
     # Deploy to Mac (self-hosted) — supports Hub or local Nexus
     # ----------------------------------------------------------
 
-    deploy-mac:
+  deploy-mac:
       name: Deploy on Mac (self-hosted)
       runs-on: [ self-hosted, macOS ]
       needs: [ resolve-target, setup, build-and-push-app, build-and-push-web, snyk-release, create-tag ]
