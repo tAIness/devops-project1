@@ -375,6 +375,7 @@ jobs:
         DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
         DB_PORT: ${{ vars.DB_PORT }}
         FLASK_PORT: ${{ vars.FLASK_PORT }}
+        WEB_PORT: ${{ vars.WEB_PORT || '8082' }}
 
       steps:
         - uses: actions/checkout@v4
@@ -404,7 +405,7 @@ jobs:
             DOCKERHUB_REPO_APP=${IMAGE_REPO_APP}
             DOCKERHUB_REPO_WEB=${IMAGE_REPO_WEB}
             TAG=${TAG}
-
+            
             # --- app runtime env ---
             DB_NAME=${DB_NAME}
             DB_USER=${DB_USER}
