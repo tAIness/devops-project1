@@ -287,7 +287,6 @@ jobs:
 
   # ----------------------------------------------------------
   # Deploy to EC2 (only when target == ec2)
-  # (kept for compatibility; skipped while you use target=mac)
   # ----------------------------------------------------------
   deploy-ec2:
     name: Deploy to EC2
@@ -295,10 +294,10 @@ jobs:
     needs: [resolve-target, setup, build-and-push-app, build-and-push-web, snyk-release, create-tag]
     if: ${{ needs.resolve-target.outputs.target == 'ec2' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
     steps:
-      - run: echo "EC2 flow skipped/disabled currently."
+      - run: echo "EC2 flow is currently disabled; using Mac until EC2 is back."
 
   # ----------------------------------------------------------
-  # Deploy to Mac (self-hosted) + mirror to local Nexus
+  # Deploy to Mac (self-hosted) + mirror APP & WEB to local Nexus
   # ----------------------------------------------------------
   deploy-mac:
     name: Deploy on Mac (self-hosted)
@@ -312,19 +311,19 @@ jobs:
       DOCKERHUB_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}
       DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
       DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-      # DB & app
+      # DB & app config
       DB_NAME: ${{ vars.DB_NAME }}
       DB_USER: ${{ vars.DB_USER }}
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
       DB_PORT: ${{ vars.DB_PORT }}
       FLASK_PORT: ${{ vars.FLASK_PORT }}
-      # Nexus (on Mac)
-      DEPLOY_REGISTRY: ${{ secrets.DEPLOY_REGISTRY }}          # set to 'nexus' to enable mirroring
-      NEXUS_DOMAIN: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}        # e.g. 127.0.0.1:5000
+      # Nexus (local on Mac)
+      DEPLOY_REGISTRY: ${{ secrets.DEPLOY_REGISTRY }}     # 'nexus' to enable mirroring/using Nexus
+      NEXUS_DOMAIN: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}  # e.g. 127.0.0.1:5000
       NEXUS_USER: ${{ secrets.NEXUS_USERNAME }}
       NEXUS_PASS: ${{ secrets.NEXUS_PASSWORD }}
-      NEXUS_REPO_APP: ${{ secrets.NEXUS_REPO_APP }}            # e.g. supermario-service
-      NEXUS_REPO_WEB: ${{ secrets.NEXUS_REPO_WEB }}            # e.g. supermario-front
+      NEXUS_REPO_APP: ${{ secrets.NEXUS_REPO_APP }}       # e.g. supermario-service
+      NEXUS_REPO_WEB: ${{ secrets.NEXUS_REPO_WEB }}       # e.g. supermario-front
     steps:
       - uses: actions/checkout@v4
 
@@ -332,12 +331,12 @@ jobs:
         if: ${{ env.DH_USER != '' && env.DH_TOKEN != '' }}
         run: echo "${DH_TOKEN}" | docker login -u "${DH_USER}" --password-stdin
 
-      - name: Mirror images to local Nexus (Mac) with skopeo
+      - name: Mirror APP & WEB to local Nexus (on Mac runner)
         if: ${{ env.DEPLOY_REGISTRY == 'nexus' }}
         shell: bash
         run: |
           set -euo pipefail
-          # Install skopeo on macOS runner
+          # Install skopeo on the Mac runner
           if ! command -v skopeo >/dev/null 2>&1; then
             brew update
             brew install skopeo
@@ -380,7 +379,6 @@ jobs:
           set -euo pipefail
           mkdir -p mac-release-flow
 
-          # If deploying via Nexus, override repos to Nexus; else keep Docker Hub.
           if [[ "${DEPLOY_REGISTRY:-hub}" == "nexus" ]]; then
             APP_REPO="${NEXUS_DOMAIN}/${NEXUS_REPO_APP}"
             WEB_REPO="${NEXUS_DOMAIN}/${NEXUS_REPO_WEB}"
@@ -399,14 +397,16 @@ jobs:
           DB_PORT=${DB_PORT}
           FLASK_PORT=${FLASK_PORT}
           EOF
-          echo "Wrote mac-release-flow/.env.local:"
+          echo "==== mac-release-flow/.env.local ===="
           cat mac-release-flow/.env.local
 
       - name: Ensure volume & best-effort pulls
         run: |
           docker volume create supermario_db_data >/dev/null
-          docker pull "$(grep '^DOCKERHUB_REPO_APP=' mac-release-flow/.env.local | cut -d= -f2):${TAG}" || true
-          docker pull "$(grep '^DOCKERHUB_REPO_WEB=' mac-release-flow/.env.local | cut -d= -f2):${TAG}" || true
+          APP_REPO="$(grep '^DOCKERHUB_REPO_APP=' mac-release-flow/.env.local | cut -d= -f2)"
+          WEB_REPO="$(grep '^DOCKERHUB_REPO_WEB=' mac-release-flow/.env.local | cut -d= -f2)"
+          docker pull "${APP_REPO}:${TAG}" || true
+          docker pull "${WEB_REPO}:${TAG}" || true
 
       - name: Compose up on Mac
         run: |
