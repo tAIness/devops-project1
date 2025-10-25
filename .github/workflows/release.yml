@@ -443,6 +443,9 @@ jobs:
               --env-file mac-release-flow/.env.local \
               -f mac-release-flow/deploy/compose.local.yml up -d --no-build
             docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+    # ----------------------------------------------------------
+    # Slack - Notify
+    # ----------------------------------------------------------
 
   notify-slack:
     if: ${{ always() }}
