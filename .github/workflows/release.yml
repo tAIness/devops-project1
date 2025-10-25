@@ -381,6 +381,14 @@ jobs:
       steps:
         - uses: actions/checkout@v4
 
+        - name: Sanity - web/app repos are distinct
+          shell: bash
+          run: |
+            if [[ "${DOCKERHUB_REPO_WEB}" == "${DOCKERHUB_REPO_APP}" ]]; then
+              echo "DOCKERHUB_REPO_WEB equals DOCKERHUB_REPO_APP (${DOCKERHUB_REPO_WEB}). Fix your secrets." >&2
+              exit 1
+            fi
+
         - name: Decide image sources (Hub or Nexus) & write .env.local
           shell: bash
           run: |
