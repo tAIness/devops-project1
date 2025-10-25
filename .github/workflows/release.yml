@@ -394,12 +394,29 @@ jobs:
           # login to Nexus too so pulls work if REGISTRY_KIND=nexus
           echo "${{ secrets.NEXUS_PASSWORD }}" | docker login "${NEXUS_DOMAIN}" -u "${{ secrets.NEXUS_USERNAME }}" --password-stdin || true
 
-      - name: Write .env.local for local compose
+      - name: Write .env.local for local compose (Hub or Nexus)
         shell: bash
         run: |
           set -euo pipefail
-          source repos.env
           mkdir -p mac-release-flow
+            
+          # Decide which registry to use for runtime images
+          if [[ "${REGISTRY_KIND:-hub}" == "nexus" ]]; then
+            APP_REPO="${NEXUS_DOMAIN}/${NEXUS_APP}"
+            WEB_REPO="${NEXUS_DOMAIN}/${NEXUS_WEB}"
+          else
+            # Important: do NOT prefix with docker.io/
+            # Use namespace/repo format like: itaef/supermario-service
+            APP_REPO="${HUB_APP}"
+            WEB_REPO="${HUB_WEB}"
+          fi
+            
+          if [[ -z "${APP_REPO}" || -z "${WEB_REPO}" ]]; then
+            echo "ERROR: APP_REPO/WEB_REPO is empty. Make sure HUB_APP/HUB_WEB (or NEXUS_* when REGISTRY_KIND=nexus) are set." >&2
+            exit 1
+          fi
+            
+          # Compose expects DOCKERHUB_REPO_APP/WEB and TAG
           cat > mac-release-flow/.env.local <<EOF
           DOCKERHUB_REPO_APP=${APP_REPO}
           DOCKERHUB_REPO_WEB=${WEB_REPO}
@@ -410,7 +427,9 @@ jobs:
           DB_PORT=${DB_PORT}
           FLASK_PORT=${FLASK_PORT}
           EOF
-          cat mac-release-flow/.env.local
+            
+          echo "Wrote mac-release-flow/.env.local:"
+          cat mac-release-flow/.env.local      
 
       - name: Ensure volume & best-effort pulls
         run: |
