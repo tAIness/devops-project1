@@ -387,13 +387,14 @@ jobs:
             set -euo pipefail
             mkdir -p mac-release-flow
 
-            # Choose where runtime will PULL images from
+            # Decide image sources
+            
             if [[ "${REGISTRY_KIND:-hub}" == "nexus" ]]; then
               IMAGE_REPO_APP="${NEXUS_DOMAIN}/${NEXUS_REPO_APP}"
-              IMAGE_REPO_WEB="${NEXUS_DOMAIN}/${NEXUS_REPO_WEB}"
+              IMAGE_REPO_WEB="${NEXUS_DOMAIN}/${NEXUS_REPO_WEB}"   # <-- must be the *web* repo
             else
               IMAGE_REPO_APP="${DOCKERHUB_REPO_APP}"
-              IMAGE_REPO_WEB="${DOCKERHUB_REPO_WEB}"
+              IMAGE_REPO_WEB="${DOCKERHUB_REPO_WEB}"               # <-- not the app
             fi
 
             # Sanity
