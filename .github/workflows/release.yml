@@ -339,109 +339,110 @@ jobs:
 
   # Deploy ONE stack on Mac (default: pull from Hub; set DEPLOY_REGISTRY=nexus to pull from Nexus instead)
   # If you *really* want two stacks at once, duplicate this job with a different COMPOSE_PROJECT_NAME and different repos.
-  deploy-mac:
-    name: Deploy on Mac (self-hosted)
-    runs-on: [self-hosted, macOS]
-    needs: [resolve-target, resolve-registry, setup, build-and-push-app, build-and-push-web, snyk-release, create-tag, mirror-to-nexus]
-    if: ${{ needs.resolve-target.outputs.target == 'mac' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
-    env:
-      TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
-      # Hub
-      HUB_APP: ${{ vars.DOCKERHUB_REPO_APP }}
-      HUB_WEB: ${{ vars.DOCKERHUB_REPO_WEB }}
-      DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
-      DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-      # Nexus
-      REGISTRY_KIND: ${{ needs.resolve-registry.outputs.registry }}   # hub|nexus
-      NEXUS_DOMAIN: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}
-      NEXUS_APP: ${{ secrets.NEXUS_REPO_APP }}
-      NEXUS_WEB: ${{ secrets.NEXUS_REPO_WEB }}
-      # DB/app
-      DB_NAME: ${{ vars.DB_NAME }}
-      DB_USER: ${{ vars.DB_USER }}
-      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-      DB_PORT: ${{ vars.DB_PORT }}
-      FLASK_PORT: ${{ vars.FLASK_PORT }}
-    steps:
-      - uses: actions/checkout@v4
 
-      - name: Choose image repositories (Hub vs Nexus)
-        id: repos
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "${REGISTRY_KIND}" == "nexus" ]]; then
-            APP_REPO="${NEXUS_DOMAIN}/${NEXUS_APP}"
-            WEB_REPO="${NEXUS_DOMAIN}/${NEXUS_WEB}"
-          else
-            APP_REPO="${HUB_APP}"
-            WEB_REPO="${HUB_WEB}"
-          fi
-          {
-            echo "APP_REPO=$APP_REPO"
-            echo "WEB_REPO=$WEB_REPO"
-          } | tee repos.env
-          echo "app_repo=$APP_REPO" >> "$GITHUB_OUTPUT"
-          echo "web_repo=$WEB_REPO" >> "$GITHUB_OUTPUT"
+    # ----------------------------------------------------------
+    # Deploy to Mac (self-hosted) — supports Hub or local Nexus
+    # ----------------------------------------------------------
 
-      - name: Docker login (Hub and Nexus)
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -n "${DH_USER}" && -n "${DH_TOKEN}" ]]; then
-            echo "${DH_TOKEN}" | docker login -u "${DH_USER}" --password-stdin || true
-          fi
-          # login to Nexus too so pulls work if REGISTRY_KIND=nexus
-          echo "${{ secrets.NEXUS_PASSWORD }}" | docker login "${NEXUS_DOMAIN}" -u "${{ secrets.NEXUS_USERNAME }}" --password-stdin || true
+    deploy-mac:
+      name: Deploy on Mac (self-hosted)
+      runs-on: [ self-hosted, macOS ]
+      needs: [ resolve-target, setup, build-and-push-app, build-and-push-web, snyk-release, create-tag ]
+      if: ${{ needs.resolve-target.outputs.target == 'mac' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
+      env:
+        # Version/tag to deploy
+        TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
 
-      - name: Write .env.local for local compose (Hub or Nexus)
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p mac-release-flow
-            
-          # Decide which registry to use for runtime images
-          if [[ "${REGISTRY_KIND:-hub}" == "nexus" ]]; then
-            APP_REPO="${NEXUS_DOMAIN}/${NEXUS_APP}"
-            WEB_REPO="${NEXUS_DOMAIN}/${NEXUS_WEB}"
-          else
-            # Important: do NOT prefix with docker.io/
-            # Use namespace/repo format like: itaef/supermario-service
-            APP_REPO="${HUB_APP}"
-            WEB_REPO="${HUB_WEB}"
-          fi
-            
-          if [[ -z "${APP_REPO}" || -z "${WEB_REPO}" ]]; then
-            echo "ERROR: APP_REPO/WEB_REPO is empty. Make sure HUB_APP/HUB_WEB (or NEXUS_* when REGISTRY_KIND=nexus) are set." >&2
-            exit 1
-          fi
-            
-          # Compose expects DOCKERHUB_REPO_APP/WEB and TAG
-          cat > mac-release-flow/.env.local <<EOF
-          DOCKERHUB_REPO_APP=${APP_REPO}
-          DOCKERHUB_REPO_WEB=${WEB_REPO}
-          TAG=${TAG}
-          DB_NAME=${DB_NAME}
-          DB_USER=${DB_USER}
-          DB_PASSWORD=${DB_PASSWORD}
-          DB_PORT=${DB_PORT}
-          FLASK_PORT=${FLASK_PORT}
-          EOF
-            
-          echo "Wrote mac-release-flow/.env.local:"
-          cat mac-release-flow/.env.local      
+        # Hub repos + creds (org/repo secrets/vars)
+        DOCKERHUB_REPO_APP: ${{ secrets.DOCKERHUB_REPO_APP }}
+        DOCKERHUB_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}
+        DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+        DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Ensure volume & best-effort pulls
-        run: |
-          source repos.env
-          docker volume create supermario_db_data >/dev/null
-          docker pull "${APP_REPO}:${TAG}" || true
-          docker pull "${WEB_REPO}:${TAG}" || true
+        # Switch to pull from Nexus by setting REGISTRY_KIND=nexus (otherwise "hub")
+        REGISTRY_KIND: ${{ vars.DEPLOY_REGISTRY }}
 
-      - name: Compose up on Mac
-        run: |
-          docker compose -f mac-release-flow/deploy/compose.local.yml up -d --no-build
-          docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+        # Local Nexus on the Mac runner (secured Docker hosted repos)
+        NEXUS_DOMAIN: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}     # e.g. 127.0.0.1:5000
+        NEXUS_USER: ${{ secrets.NEXUS_USERNAME }}
+        NEXUS_PASS: ${{ secrets.NEXUS_PASSWORD }}
+        NEXUS_REPO_APP: ${{ secrets.NEXUS_REPO_APP }}          # e.g. supermario-service
+        NEXUS_REPO_WEB: ${{ secrets.NEXUS_REPO_WEB }}          # e.g. supermario-front
+
+        # App/DB runtime config
+        DB_NAME: ${{ vars.DB_NAME }}
+        DB_USER: ${{ vars.DB_USER }}
+        DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+        DB_PORT: ${{ vars.DB_PORT }}
+        FLASK_PORT: ${{ vars.FLASK_PORT }}
+
+      steps:
+        - uses: actions/checkout@v4
+
+        - name: Decide image sources (Hub or Nexus) & write .env.local
+          shell: bash
+          run: |
+            set -euo pipefail
+            mkdir -p mac-release-flow
+
+            # Choose where runtime will PULL images from
+            if [[ "${REGISTRY_KIND:-hub}" == "nexus" ]]; then
+              IMAGE_REPO_APP="${NEXUS_DOMAIN}/${NEXUS_REPO_APP}"
+              IMAGE_REPO_WEB="${NEXUS_DOMAIN}/${NEXUS_REPO_WEB}"
+            else
+              IMAGE_REPO_APP="${DOCKERHUB_REPO_APP}"
+              IMAGE_REPO_WEB="${DOCKERHUB_REPO_WEB}"
+            fi
+
+            # Sanity
+            : "${IMAGE_REPO_APP:?IMAGE_REPO_APP is empty}"
+            : "${IMAGE_REPO_WEB:?IMAGE_REPO_WEB is empty}"
+            : "${TAG:?TAG is empty}"
+
+            cat > mac-release-flow/.env.local <<EOF
+            # --- image sources for compose ---
+            DOCKERHUB_REPO_APP=${IMAGE_REPO_APP}
+            DOCKERHUB_REPO_WEB=${IMAGE_REPO_WEB}
+            TAG=${TAG}
+
+            # --- app runtime env ---
+            DB_NAME=${DB_NAME}
+            DB_USER=${DB_USER}
+            DB_PASSWORD=${DB_PASSWORD}
+            DB_PORT=${DB_PORT}
+            FLASK_PORT=${FLASK_PORT}
+            EOF
+
+            echo "Using image sources:"
+            cat mac-release-flow/.env.local | sed -n '1,6p'
+
+        - name: Login to Docker Hub (pull fallback)
+          if: ${{ env.DH_USER != '' && env.DH_TOKEN != '' }}
+          run: echo "${DH_TOKEN}" | docker login -u "${DH_USER}" --password-stdin
+
+        - name: Login to local Nexus registry (only if REGISTRY_KIND=nexus)
+          if: ${{ env.REGISTRY_KIND == 'nexus' && env.NEXUS_DOMAIN != '' && env.NEXUS_USER != '' && env.NEXUS_PASS != '' }}
+          run: echo "${NEXUS_PASS}" | docker login "${NEXUS_DOMAIN}" -u "${NEXUS_USER}" --password-stdin
+
+        - name: Ensure volume & try pre-pulling images (helps first boot)
+          shell: bash
+          run: |
+            set -euo pipefail
+            docker volume create supermario_db_data >/dev/null
+
+            APP_REPO="$(grep '^DOCKERHUB_REPO_APP=' mac-release-flow/.env.local | cut -d= -f2)"
+            WEB_REPO="$(grep '^DOCKERHUB_REPO_WEB=' mac-release-flow/.env.local | cut -d= -f2)"
+
+            echo "Pre-pulling ${APP_REPO}:${TAG} and ${WEB_REPO}:${TAG} (best effort)…"
+            docker pull "${APP_REPO}:${TAG}" || true
+            docker pull "${WEB_REPO}:${TAG}" || true
+
+        - name: Compose up on Mac (load env file explicitly)
+          run: |
+            docker compose \
+              --env-file mac-release-flow/.env.local \
+              -f mac-release-flow/deploy/compose.local.yml up -d --no-build
+            docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 
   notify-slack:
     if: ${{ always() }}
