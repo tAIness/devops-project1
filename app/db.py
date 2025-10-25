@@ -10,9 +10,15 @@ from psycopg2.pool import SimpleConnectionPool
 
 # Single source of truth for DB connection in containers:
 # service name 'db', default creds match docker-compose defaults.
+DB_NAME = os.getenv("DB_NAME", "mario")
+DB_USER = os.getenv("DB_USER", "mario")
+DB_PASSWORD = os.getenv("DB_PASSWORD", "mario123")
+DB_PORT = os.getenv("DB_PORT", "5432")
+DB_HOST = os.getenv("DB_HOST", "db")
+
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql://supermario:supermario@db:5432/supermario",
+    f"postgresql://{DB_USER}:{DB_PASSWORD}@{DB_HOST}:{DB_PORT}/{DB_NAME}",
 )
 
 _MIN_CONN = int(os.getenv("DB_POOL_MIN", "1"))
