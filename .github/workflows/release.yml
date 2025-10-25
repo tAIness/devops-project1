@@ -181,56 +181,20 @@ jobs:
       DOCKERHUB_REPO_APP: ${{ secrets.DOCKERHUB_REPO_APP }}
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
-
       - name: Login to Docker Hub
         if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
         uses: docker/login-action@v3
         with:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
-
-      - name: Build & push app (multi-arch)
+      - name: Build & push (linux/amd64, linux/arm64)
         uses: docker/build-push-action@v6
         with:
           context: ./app
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ env.DOCKERHUB_REPO_APP }}:${{ env.IMAGE_TAG }},${{ env.DOCKERHUB_REPO_APP }}:latest
-
-      - name: Mirror APP to Nexus on EC2
-        if: ${{ needs.resolve-target.outputs.target == 'ec2' }}
-        uses: appleboy/ssh-action@v1.0.3
-        env:
-          IMAGE_TAG: ${{ env.IMAGE_TAG }}
-          DOCKERHUB_REPO_APP: ${{ secrets.DOCKERHUB_REPO_APP }}
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-          NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
-          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
-          NEXUS_REPO_APP: ${{ secrets.NEXUS_REPO_APP }}
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          port: ${{ secrets.EC2_SSH_PORT || '22' }}
-          envs: IMAGE_TAG,DOCKERHUB_REPO_APP,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,NEXUS_USERNAME,NEXUS_PASSWORD,NEXUS_REPO_APP
-          script: |
-            set -euo pipefail
-            if ! command -v skopeo >/dev/null 2>&1; then
-              sudo apt-get update -y && sudo apt-get install -y skopeo
-            fi
-            SRC="docker://${DOCKERHUB_REPO_APP}:${IMAGE_TAG}"
-            DST="docker://127.0.0.1:5000/${NEXUS_REPO_APP}:${IMAGE_TAG}"
-            skopeo copy --src-creds "${DOCKERHUB_USERNAME}:${DOCKERHUB_TOKEN}" \
-                        --dest-creds "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
-                        --src-tls-verify=true --dest-tls-verify=false \
-                        "${SRC}" "${DST}"
-            skopeo copy --src-creds "${DOCKERHUB_USERNAME}:${DOCKERHUB_TOKEN}" \
-                        --dest-creds "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
-                        --src-tls-verify=true --dest-tls-verify=false \
-                        "${SRC}" "docker://127.0.0.1:5000/${NEXUS_REPO_APP}:latest"
+          tags: ${{ env.DOCKERHUB_REPO_APP }}:${{ env.IMAGE_TAG }}
 
   # ----------------------------------------------------------
   # Build & push WEB image (multi-arch)
@@ -246,53 +210,20 @@ jobs:
       DOCKERHUB_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}
     steps:
       - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
-
       - name: Login to Docker Hub
         if: ${{ env.DOCKERHUB_USERNAME != '' && env.DOCKERHUB_TOKEN != '' }}
         uses: docker/login-action@v3
         with:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ env.DOCKERHUB_TOKEN }}
-
-      - name: Build & push web (multi-arch)
+      - name: Build & push (linux/amd64, linux/arm64)
         uses: docker/build-push-action@v6
         with:
           context: ./web
           platforms: linux/amd64,linux/arm64
           push: true
-          tags: ${{ env.DOCKERHUB_REPO_WEB }}:${{ env.IMAGE_TAG }},${{ env.DOCKERHUB_REPO_WEB }}:latest
-
-      - name: Mirror WEB to Nexus on EC2
-        if: ${{ needs.resolve-target.outputs.target == 'ec2' }}
-        uses: appleboy/ssh-action@v1.0.3
-        env:
-          IMAGE_TAG: ${{ env.IMAGE_TAG }}
-          DOCKERHUB_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}
-          DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
-          DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-          NEXUS_USERNAME: ${{ secrets.NEXUS_USERNAME }}
-          NEXUS_PASSWORD: ${{ secrets.NEXUS_PASSWORD }}
-          NEXUS_REPO_WEB: ${{ secrets.NEXUS_REPO_WEB }}
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          port: ${{ secrets.EC2_SSH_PORT || '22' }}
-          envs: IMAGE_TAG,DOCKERHUB_REPO_WEB,DOCKERHUB_USERNAME,DOCKERHUB_TOKEN,NEXUS_USERNAME,NEXUS_PASSWORD,NEXUS_REPO_WEB
-          script: |
-            set -euo pipefail
-            SRC="docker://${DOCKERHUB_REPO_WEB}:${IMAGE_TAG}"
-            DST="docker://127.0.0.1:5000/${NEXUS_REPO_WEB}:${IMAGE_TAG}"
-            skopeo copy --src-creds "${DOCKERHUB_USERNAME}:${DOCKERHUB_TOKEN}" \
-                        --dest-creds "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
-                        --src-tls-verify=true --dest-tls-verify=false \
-                        "${SRC}" "${DST}"
-            skopeo copy --src-creds "${DOCKERHUB_USERNAME}:${DOCKERHUB_TOKEN}" \
-                        --dest-creds "${NEXUS_USERNAME}:${NEXUS_PASSWORD}" \
-                        --src-tls-verify=true --dest-tls-verify=false \
-                        "${SRC}" "docker://127.0.0.1:5000/${NEXUS_REPO_WEB}:latest"
+          tags: ${{ env.DOCKERHUB_REPO_WEB }}:${{ env.IMAGE_TAG }}
 
   # ----------------------------------------------------------
   # Snyk (mandatory)
@@ -356,123 +287,18 @@ jobs:
 
   # ----------------------------------------------------------
   # Deploy to EC2 (only when target == ec2)
+  # (kept for compatibility; skipped while you use target=mac)
   # ----------------------------------------------------------
   deploy-ec2:
     name: Deploy to EC2
     runs-on: ubuntu-latest
     needs: [resolve-target, setup, build-and-push-app, build-and-push-web, snyk-release, create-tag]
     if: ${{ needs.resolve-target.outputs.target == 'ec2' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
-    env:
-      TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
-      DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
-      DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-      DH_REPO_APP: ${{ secrets.DOCKERHUB_REPO_APP }}
-      DH_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}
-      REGISTRY_URL: ${{ secrets.REGISTRY_URL }}
-      REGISTRY_USERNAME: ${{ secrets.REGISTRY_USERNAME }}
-      REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
-      NEXUS_REPO_APP: ${{ secrets.NEXUS_REPO_APP }}
-      NEXUS_REPO_WEB: ${{ secrets.NEXUS_REPO_WEB }}
-      DEPLOY_REGISTRY: ${{ secrets.DEPLOY_REGISTRY }}
-      FLASK_PORT: ${{ secrets.FLASK_PORT }}
-      DB_NAME: ${{ secrets.DB_NAME }}
-      DB_USER: ${{ secrets.DB_USER }}
-      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-      DB_PORT: ${{ secrets.DB_PORT }}
     steps:
-      - uses: actions/checkout@v4
-      - name: Ensure target dir & perms
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          port: ${{ secrets.EC2_SSH_PORT || '22' }}
-          script: |
-            set -e
-            sudo mkdir -p /srv/supermario
-            sudo chown -R $USER:$USER /srv/supermario
-      - name: Upload compose.yml
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          port: ${{ secrets.EC2_SSH_PORT || '22' }}
-          source: deploy/compose.yml
-          target: /srv/supermario
-          strip_components: 1
-      - name: Upload static images
-        if: ${{ hashFiles('content/images/**') != '' }}
-        uses: appleboy/scp-action@v0.1.7
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          port: ${{ secrets.EC2_SSH_PORT || '22' }}
-          source: content/images/**
-          target: /srv/supermario
-      - name: Deploy on EC2
-        uses: appleboy/ssh-action@v1.0.3
-        env:
-          TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
-          DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
-          DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-          DH_REPO_APP: ${{ secrets.DOCKERHUB_REPO_APP }}
-          DH_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}
-          NEXUS_DOMAIN: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}
-          NEXUS_USER: ${{ secrets.NEXUS_USERNAME }}
-          NEXUS_PASS: ${{ secrets.NEXUS_PASSWORD }}
-          NEXUS_REPO_APP: ${{ secrets.NEXUS_REPO_APP }}
-          NEXUS_REPO_WEB: ${{ secrets.NEXUS_REPO_WEB }}
-          DEPLOY_REGISTRY: ${{ secrets.DEPLOY_REGISTRY }}
-          DB_NAME: ${{ secrets.DB_NAME }}
-          DB_USER: ${{ secrets.DB_USER }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-          DB_PORT: ${{ secrets.DB_PORT }}
-          FLASK_PORT: ${{ secrets.FLASK_PORT }}
-        with:
-          host: ${{ secrets.EC2_HOST }}
-          username: ${{ secrets.EC2_USER }}
-          key: ${{ secrets.EC2_SSH_KEY }}
-          envs: TAG,DH_USER,DH_TOKEN,DH_REPO_APP,DH_REPO_WEB,NEXUS_DOMAIN,NEXUS_USER,NEXUS_PASS,NEXUS_REPO_APP,NEXUS_REPO_WEB,DEPLOY_REGISTRY,DB_NAME,DB_USER,DB_PASSWORD,DB_PORT,FLASK_PORT
-          script: |
-            set -eo pipefail
-            sudo mkdir -p /srv/supermario/content/images
-            cd /srv/supermario
-            if [ -z "${TAG:-}" ]; then
-              echo "ERROR: TAG is empty."; exit 1
-            fi
-            REG="${DEPLOY_REGISTRY:-hub}"
-            if [ "$REG" = "nexus" ]; then
-              NEXUS_LOCAL="127.0.0.1:5000"
-              echo "${NEXUS_PASS}" | sudo docker login "${NEXUS_LOCAL}" -u "${NEXUS_USER}" --password-stdin
-              IMAGE_REPO_APP="${NEXUS_LOCAL}/${NEXUS_REPO_APP}"
-              IMAGE_REPO_WEB="${NEXUS_LOCAL}/${NEXUS_REPO_WEB}"
-            else
-              echo "${DH_TOKEN}" | sudo docker login -u "${DH_USER}" --password-stdin
-              IMAGE_REPO_APP="${DH_REPO_APP}"
-              IMAGE_REPO_WEB="${DH_REPO_WEB}"
-            fi
-            {
-              echo "IMAGE_REPO_APP=${IMAGE_REPO_APP}"
-              echo "IMAGE_REPO_WEB=${IMAGE_REPO_WEB}"
-              echo "TAG=${TAG}"
-              echo "DB_NAME=${DB_NAME}"
-              echo "DB_USER=${DB_USER}"
-              echo "DB_PASSWORD=${DB_PASSWORD}"
-              echo "DB_PORT=${DB_PORT:-5432}"
-              echo "FLASK_PORT=${FLASK_PORT:-8000}"
-            } | sudo tee .env >/dev/null
-            sudo docker pull "${IMAGE_REPO_APP}:${TAG}"
-            sudo docker pull "${IMAGE_REPO_WEB}:${TAG}"
-            sudo docker volume create supermario_db_data >/dev/null
-            sudo docker compose -f compose.yml pull
-            sudo docker compose -f compose.yml up -d --no-build
-            sudo docker image prune -f
+      - run: echo "EC2 flow skipped/disabled currently."
 
   # ----------------------------------------------------------
-  # Deploy to Mac (self-hosted) when target == mac
+  # Deploy to Mac (self-hosted) + mirror to local Nexus
   # ----------------------------------------------------------
   deploy-mac:
     name: Deploy on Mac (self-hosted)
@@ -481,38 +307,107 @@ jobs:
     if: ${{ needs.resolve-target.outputs.target == 'mac' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
     env:
       TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
+      # Docker Hub
       DOCKERHUB_REPO_APP: ${{ secrets.DOCKERHUB_REPO_APP }}
       DOCKERHUB_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}
       DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
       DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+      # DB & app
       DB_NAME: ${{ vars.DB_NAME }}
       DB_USER: ${{ vars.DB_USER }}
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
       DB_PORT: ${{ vars.DB_PORT }}
       FLASK_PORT: ${{ vars.FLASK_PORT }}
+      # Nexus (on Mac)
+      DEPLOY_REGISTRY: ${{ secrets.DEPLOY_REGISTRY }}          # set to 'nexus' to enable mirroring
+      NEXUS_DOMAIN: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}        # e.g. 127.0.0.1:5000
+      NEXUS_USER: ${{ secrets.NEXUS_USERNAME }}
+      NEXUS_PASS: ${{ secrets.NEXUS_PASSWORD }}
+      NEXUS_REPO_APP: ${{ secrets.NEXUS_REPO_APP }}            # e.g. supermario-service
+      NEXUS_REPO_WEB: ${{ secrets.NEXUS_REPO_WEB }}            # e.g. supermario-front
     steps:
       - uses: actions/checkout@v4
-      - name: Write .env.local for local compose
-        run: |
-          mkdir -p mac-release-flow
-          cat > mac-release-flow/.env.local <<EOF
-          DOCKERHUB_REPO_APP=${{ env.DOCKERHUB_REPO_APP }}
-          DOCKERHUB_REPO_WEB=${{ env.DOCKERHUB_REPO_WEB }}
-          TAG=${{ env.TAG }}
-          DB_NAME=${{ env.DB_NAME }}
-          DB_USER=${{ env.DB_USER }}
-          DB_PASSWORD=${{ env.DB_PASSWORD }}
-          DB_PORT=${{ env.DB_PORT }}
-          FLASK_PORT=${{ env.FLASK_PORT }}
-          EOF
-      - name: Optional Docker Hub login (to pull images)
+
+      - name: Ensure docker login to Hub (pull fallback)
         if: ${{ env.DH_USER != '' && env.DH_TOKEN != '' }}
         run: echo "${DH_TOKEN}" | docker login -u "${DH_USER}" --password-stdin
+
+      - name: Mirror images to local Nexus (Mac) with skopeo
+        if: ${{ env.DEPLOY_REGISTRY == 'nexus' }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Install skopeo on macOS runner
+          if ! command -v skopeo >/dev/null 2>&1; then
+            brew update
+            brew install skopeo
+          fi
+
+          SRC_APP="docker://${DOCKERHUB_REPO_APP}:${TAG}"
+          SRC_WEB="docker://${DOCKERHUB_REPO_WEB}:${TAG}"
+          DST_APP="docker://${NEXUS_DOMAIN}/${NEXUS_REPO_APP}:${TAG}"
+          DST_WEB="docker://${NEXUS_DOMAIN}/${NEXUS_REPO_WEB}:${TAG}"
+
+          echo "Mirroring ${SRC_APP} -> ${DST_APP}"
+          skopeo copy \
+            --src-creds "${DH_USER}:${DH_TOKEN}" \
+            --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
+            --src-tls-verify=true --dest-tls-verify=false \
+            "${SRC_APP}" "${DST_APP}"
+
+          echo "Mirroring ${SRC_WEB} -> ${DST_WEB}"
+          skopeo copy \
+            --src-creds "${DH_USER}:${DH_TOKEN}" \
+            --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
+            --src-tls-verify=true --dest-tls-verify=false \
+            "${SRC_WEB}" "${DST_WEB}"
+
+          # Also tag 'latest' in Nexus (optional)
+          skopeo copy \
+            --src-creds "${DH_USER}:${DH_TOKEN}" \
+            --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
+            --src-tls-verify=true --dest-tls-verify=false \
+            "${SRC_APP}" "docker://${NEXUS_DOMAIN}/${NEXUS_REPO_APP}:latest"
+          skopeo copy \
+            --src-creds "${DH_USER}:${DH_TOKEN}" \
+            --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
+            --src-tls-verify=true --dest-tls-verify=false \
+            "${SRC_WEB}" "docker://${NEXUS_DOMAIN}/${NEXUS_REPO_WEB}:latest"
+
+      - name: Write .env.local for local compose (point to Nexus or Hub)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p mac-release-flow
+
+          # If deploying via Nexus, override repos to Nexus; else keep Docker Hub.
+          if [[ "${DEPLOY_REGISTRY:-hub}" == "nexus" ]]; then
+            APP_REPO="${NEXUS_DOMAIN}/${NEXUS_REPO_APP}"
+            WEB_REPO="${NEXUS_DOMAIN}/${NEXUS_REPO_WEB}"
+          else
+            APP_REPO="${DOCKERHUB_REPO_APP}"
+            WEB_REPO="${DOCKERHUB_REPO_WEB}"
+          fi
+
+          cat > mac-release-flow/.env.local <<EOF
+          DOCKERHUB_REPO_APP=${APP_REPO}
+          DOCKERHUB_REPO_WEB=${WEB_REPO}
+          TAG=${TAG}
+          DB_NAME=${DB_NAME}
+          DB_USER=${DB_USER}
+          DB_PASSWORD=${DB_PASSWORD}
+          DB_PORT=${DB_PORT}
+          FLASK_PORT=${FLASK_PORT}
+          EOF
+          echo "Wrote mac-release-flow/.env.local:"
+          cat mac-release-flow/.env.local
+
       - name: Ensure volume & best-effort pulls
         run: |
           docker volume create supermario_db_data >/dev/null
-          docker pull "${DOCKERHUB_REPO_APP}:${TAG}" || true
-          docker pull "${DOCKERHUB_REPO_WEB}:${TAG}" || true
+          docker pull "$(grep '^DOCKERHUB_REPO_APP=' mac-release-flow/.env.local | cut -d= -f2):${TAG}" || true
+          docker pull "$(grep '^DOCKERHUB_REPO_WEB=' mac-release-flow/.env.local | cut -d= -f2):${TAG}" || true
+
       - name: Compose up on Mac
         run: |
           docker compose -f mac-release-flow/deploy/compose.local.yml up -d --no-build
