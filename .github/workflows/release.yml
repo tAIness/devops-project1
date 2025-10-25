@@ -388,13 +388,12 @@ jobs:
             mkdir -p mac-release-flow
 
             # Decide image sources
-            
             if [[ "${REGISTRY_KIND:-hub}" == "nexus" ]]; then
               IMAGE_REPO_APP="${NEXUS_DOMAIN}/${NEXUS_REPO_APP}"
-              IMAGE_REPO_WEB="${NEXUS_DOMAIN}/${NEXUS_REPO_WEB}"   # <-- must be the *web* repo
+              IMAGE_REPO_WEB="${NEXUS_DOMAIN}/${NEXUS_REPO_WEB}"   # <-- web repo
             else
               IMAGE_REPO_APP="${DOCKERHUB_REPO_APP}"
-              IMAGE_REPO_WEB="${DOCKERHUB_REPO_WEB}"               # <-- not the app
+              IMAGE_REPO_WEB="${DOCKERHUB_REPO_WEB}"               # <-- web repo
             fi
 
             # Sanity
@@ -402,12 +401,14 @@ jobs:
             : "${IMAGE_REPO_WEB:?IMAGE_REPO_WEB is empty}"
             : "${TAG:?TAG is empty}"
 
+            # Write env file (now includes WEB_PORT)
             cat > mac-release-flow/.env.local <<EOF
             # --- image sources for compose ---
             DOCKERHUB_REPO_APP=${IMAGE_REPO_APP}
             DOCKERHUB_REPO_WEB=${IMAGE_REPO_WEB}
             TAG=${TAG}
-            
+            WEB_PORT=${WEB_PORT}
+
             # --- app runtime env ---
             DB_NAME=${DB_NAME}
             DB_USER=${DB_USER}
@@ -417,7 +418,18 @@ jobs:
             EOF
 
             echo "Using image sources:"
-            cat mac-release-flow/.env.local | sed -n '1,6p'
+            sed -n '1,8p' mac-release-flow/.env.local
+
+            # ---- VALIDATION (kept inside run block!) ----
+            WEB_IMAGE=$(docker compose \
+              --env-file mac-release-flow/.env.local \
+              -f mac-release-flow/deploy/compose.local.yml config \
+              | awk '/web:/{p=1} p&&/image:/{print $2; exit}')
+            echo "Resolved web image: ${WEB_IMAGE}"
+            case "$WEB_IMAGE" in
+              *supermario-front:*) echo "OK: web image looks correct." ;;
+              *) echo "ERROR: web image is not the front image (${WEB_IMAGE}). Check DOCKERHUB_REPO_WEB/NEXUS_REPO_WEB." >&2; exit 1 ;;
+            esac
 
         - name: Login to Docker Hub (pull fallback)
           if: ${{ env.DH_USER != '' && env.DH_TOKEN != '' }}
