@@ -66,3 +66,12 @@ secrets:
     stringData:
       admin-user: admin
       admin-password: admin
+
+  - name: keda
+    destinationNamespace: keda
+    source:
+      repoURL: https://kedacore.github.io/charts
+      chart: keda
+      targetRevision: 2.14.0
+    helm:
+      values: ""   # optional overrides

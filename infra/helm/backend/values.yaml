@@ -1,3 +1,4 @@
+# /devops-project1/infra/helm/backend/values.yaml
 image:
   repository: docker.io/itaef/supermario-service
   tag: ""                    # ← empty means “use .Chart.AppVersion”
@@ -29,7 +30,7 @@ runtime:
   fixPasswd: false  # set true only if you still need the passwd overlay
 
 autoscaling:
-  mode: keda                # one of: none | hpa | keda
+  mode: none                # one of: none | hpa | keda
 
   hpa:
     minReplicas: 1

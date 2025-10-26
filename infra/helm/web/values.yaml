@@ -1,36 +1,37 @@
-image:
-  repository: docker.io/itaef/supermario-front
-  tag: ""                 # use .Chart.AppVersion
-  pullPolicy: IfNotPresent
+  # /devops-project1/infra/helm/web/values.yaml
+  image:
+    repository: docker.io/itaef/supermario-front
+    tag: ""                 # use .Chart.AppVersion
+    pullPolicy: IfNotPresent
 
-imagePullSecrets:
-  - name: dockerhub-cred
+  imagePullSecrets:
+    - name: dockerhub-cred
 
-service:
-  port: 80
+  service:
+    port: 80
 
-nginx:
-  configMapName: web-nginx
+  nginx:
+    configMapName: web-nginx
 
-backend:
-  # Full DNS name of your backend Service (it lives in mario-backend ns)
-  host: app-svc.mario-backend.svc.cluster.local
-  port: 8000
+  backend:
+    # Full DNS name of your backend Service (it lives in mario-backend ns)
+    host: app-svc.mario-backend.svc.cluster.local
+    port: 8000
 
-# Optional resources (so Argo/Helm never sees nulls)
-resources:
-  requests:
-    cpu: 100m
-    memory: 128Mi
-  limits:
-    cpu: 500m
-    memory: 256Mi
+  # Optional resources (so Argo/Helm never sees nulls)
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
 
-ingress:
-  enabled: true
-  className: nginx
-  host: web.mario.local
-  paths:
-    - path: /
-      pathType: Prefix
-      servicePort: 80
+  ingress:
+    enabled: true
+    className: nginx
+    host: web.mario.local
+    paths:
+      - path: /
+        pathType: Prefix
+        servicePort: 80
