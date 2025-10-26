@@ -9,10 +9,22 @@ on:
   workflow_dispatch:
     inputs:
       target:
-        description: "Deploy target (mac = self-hosted, ec2 = remote EC2)"
+        description: "Deploy target (mac=self-hosted, ec2=remote EC2)"
         type: choice
         options: [mac, ec2]
         default: mac
+      use_existing_images:
+        description: "Skip builds and use an existing image tag"
+        type: boolean
+        default: false
+      image_tag:
+        description: "Existing image tag to deploy (required when skipping builds)"
+        type: string
+        default: ""
+      run_snyk:
+        description: "Run Snyk scan (pulls images; may hit rate limits)"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -23,6 +35,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # ------------------------------------------------------------
+  # Resolve deploy target once (input > org/repo var > default)
+  # ------------------------------------------------------------
   resolve-target:
     name: Resolve deploy target
     runs-on: ubuntu-latest
@@ -38,21 +53,9 @@ jobs:
           echo "target=$tgt" >> "$GITHUB_OUTPUT"
           echo "Deploy target resolved to: $tgt"
 
-  resolve-registry:
-    name: Resolve deploy registry
-    runs-on: ubuntu-latest
-    outputs:
-      registry: ${{ steps.out.outputs.registry }}
-    steps:
-      - id: out
-        shell: bash
-        run: |
-          sec="${{ secrets.DEPLOY_REGISTRY }}"
-          var="${{ vars.DEPLOY_REGISTRY }}"
-          reg="${sec:-${var:-hub}}"
-          echo "registry=$reg" >> "$GITHUB_OUTPUT"
-          echo "Deploy registry resolved to: $reg"
-
+  # ----------------------------------------------------------
+  # Tag computation: continue v*.*.* series (patch bumps)
+  # ----------------------------------------------------------
   compute-tag:
     name: Compute next tag (when pushing to main)
     runs-on: ubuntu-latest
@@ -77,24 +80,53 @@ jobs:
             patch=$((10#$patch + 1))
           fi
           echo "tag=v${major}.${minor}.${patch}" >> "$GITHUB_OUTPUT"
+          echo "Next tag: v${major}.${minor}.${patch}"
 
-  setup:
-    name: Resolve image tag
+  # ----------------------------------------------------------
+  # Decide IMAGE_TAG & whether we build or reuse images
+  # ----------------------------------------------------------
+  resolve-build-mode:
+    name: Resolve image tag & build mode
     runs-on: ubuntu-latest
     needs: [compute-tag]
     outputs:
-      IMAGE_TAG: ${{ steps.resolve.outputs.IMAGE_TAG }}
+      IMAGE_TAG: ${{ steps.out.outputs.IMAGE_TAG }}
+      BUILD_IMAGES: ${{ steps.out.outputs.BUILD_IMAGES }}
+      RUN_SNYK: ${{ steps.out.outputs.RUN_SNYK }}
     steps:
-      - id: resolve
+      - id: out
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            echo "IMAGE_TAG=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          if [[ "${{ inputs.use_existing_images }}" == "true" ]]; then
+            BUILD="false"
           else
-            echo "IMAGE_TAG=${{ needs.compute-tag.outputs.tag }}" >> "$GITHUB_OUTPUT"
+            BUILD="true"
           fi
 
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            TAG="${{ github.ref_name }}"
+          elif [[ -n "${{ inputs.image_tag }}" ]]; then
+            TAG="${{ inputs.image_tag }}"
+          else
+            TAG="${{ needs.compute-tag.outputs.tag }}"
+          fi
+
+          if [[ "$BUILD" == "false" && "${{ github.ref_type }}" != "tag" && -z "${{ inputs.image_tag }}" ]]; then
+            echo "::error::use_existing_images=true but no image_tag was provided."
+            exit 1
+          fi
+
+          if [[ "${{ inputs.run_snyk }}" == "true" ]]; then RUN_SNYK="true"; else RUN_SNYK="false"; fi
+
+          echo "IMAGE_TAG=$TAG"       >> "$GITHUB_OUTPUT"
+          echo "BUILD_IMAGES=$BUILD"  >> "$GITHUB_OUTPUT"
+          echo "RUN_SNYK=$RUN_SNYK"   >> "$GITHUB_OUTPUT"
+          echo "Resolved: IMAGE_TAG=$TAG · BUILD_IMAGES=$BUILD · RUN_SNYK=$RUN_SNYK"
+
+  # ----------------------------------------------------------
+  # Bump helm appVersions on main
+  # ----------------------------------------------------------
   bump-helm-appversion:
     name: Bump Helm appVersion in all charts & push
     runs-on: ubuntu-latest
@@ -164,15 +196,19 @@ jobs:
             git push origin "$TAG"
           fi
 
+  # ----------------------------------------------------------
+  # Build & push APP image (multi-arch) — gated
+  # ----------------------------------------------------------
   build-and-push-app:
     name: Build & push app image
     runs-on: ubuntu-latest
-    needs: [setup]
+    needs: [resolve-build-mode]
+    if: ${{ needs.resolve-build-mode.outputs.BUILD_IMAGES == 'true' }}
     env:
-      IMAGE_TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
+      IMAGE_TAG: ${{ needs.resolve-build-mode.outputs.IMAGE_TAG }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-      DOCKERHUB_REPO_APP: ${{ vars.DOCKERHUB_REPO_APP }}
+      DOCKERHUB_REPO_APP: ${{ secrets.DOCKERHUB_REPO_APP }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -190,15 +226,19 @@ jobs:
           push: true
           tags: ${{ env.DOCKERHUB_REPO_APP }}:${{ env.IMAGE_TAG }}
 
+  # ----------------------------------------------------------
+  # Build & push WEB image (multi-arch) — gated
+  # ----------------------------------------------------------
   build-and-push-web:
     name: Build & push web image
     runs-on: ubuntu-latest
-    needs: [setup]
+    needs: [resolve-build-mode]
+    if: ${{ needs.resolve-build-mode.outputs.BUILD_IMAGES == 'true' }}
     env:
-      IMAGE_TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
+      IMAGE_TAG: ${{ needs.resolve-build-mode.outputs.IMAGE_TAG }}
       DOCKERHUB_USERNAME: ${{ secrets.DOCKERHUB_USERNAME }}
       DOCKERHUB_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-      DOCKERHUB_REPO_WEB: ${{ vars.DOCKERHUB_REPO_WEB }}
+      DOCKERHUB_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}
     steps:
       - uses: actions/checkout@v4
       - uses: docker/setup-buildx-action@v3
@@ -216,15 +256,19 @@ jobs:
           push: true
           tags: ${{ env.DOCKERHUB_REPO_WEB }}:${{ env.IMAGE_TAG }}
 
+  # ----------------------------------------------------------
+  # Snyk (optional)
+  # ----------------------------------------------------------
   snyk-release:
     name: Snyk scan of images
     runs-on: ubuntu-latest
-    needs: [setup, build-and-push-app, build-and-push-web]
+    needs: [resolve-build-mode, build-and-push-app, build-and-push-web]
+    if: ${{ needs.resolve-build-mode.outputs.RUN_SNYK == 'true' }}
     env:
-      IMAGE_TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
+      IMAGE_TAG: ${{ needs.resolve-build-mode.outputs.IMAGE_TAG }}
       SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
-      DOCKERHUB_REPO_APP: ${{ vars.DOCKERHUB_REPO_APP }}
-      DOCKERHUB_REPO_WEB: ${{ vars.DOCKERHUB_REPO_WEB }}
+      DOCKERHUB_REPO_APP: ${{ secrets.DOCKERHUB_REPO_APP }}
+      DOCKERHUB_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}
     steps:
       - uses: actions/checkout@v4
       - uses: snyk/actions/setup@0.4.0
@@ -273,316 +317,215 @@ jobs:
           echo "Blocking release: Snyk found issues above threshold."
           exit 1
 
-  # Publish to **both** registries: this mirrors Hub -> Nexus on the Mac
+  # ----------------------------------------------------------
+  # Mirror to local Nexus (Mac) — separate stage
+  # ----------------------------------------------------------
   mirror-to-nexus:
-    name: Mirror APP & WEB to Nexus (Mac)
+    name: Mirror to local Nexus
     runs-on: [self-hosted, macOS]
-    needs: [resolve-target, setup, build-and-push-app, build-and-push-web, snyk-release, create-tag]
-    if: ${{ needs.resolve-target.outputs.target == 'mac' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
+    needs: [resolve-target, resolve-build-mode, build-and-push-app, build-and-push-web]
+    if: ${{ needs.resolve-target.outputs.target == 'mac' && vars.DEPLOY_REGISTRY == 'nexus' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
     env:
-      TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
-      DOCKERHUB_REPO_APP: ${{ vars.DOCKERHUB_REPO_APP }}
-      DOCKERHUB_REPO_WEB: ${{ vars.DOCKERHUB_REPO_WEB }}
+      TAG: ${{ needs.resolve-build-mode.outputs.IMAGE_TAG }}
+      DOCKERHUB_REPO_APP: ${{ secrets.DOCKERHUB_REPO_APP }}
+      DOCKERHUB_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}
       DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
       DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
       NEXUS_DOMAIN: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}   # e.g. 127.0.0.1:5000
       NEXUS_USER: ${{ secrets.NEXUS_USERNAME }}
       NEXUS_PASS: ${{ secrets.NEXUS_PASSWORD }}
-      NEXUS_REPO_APP: ${{ secrets.NEXUS_REPO_APP }}        # e.g. supermario-service
-      NEXUS_REPO_WEB: ${{ secrets.NEXUS_REPO_WEB }}        # e.g. supermario-front
+      NEXUS_REPO_APP: ${{ secrets.NEXUS_REPO_APP }}
+      NEXUS_REPO_WEB: ${{ secrets.NEXUS_REPO_WEB }}
     steps:
       - uses: actions/checkout@v4
-      - name: Install skopeo (macOS)
+      - name: Install skopeo (brew)
+        shell: bash
         run: |
+          set -euo pipefail
           if ! command -v skopeo >/dev/null 2>&1; then
             brew update
             brew install skopeo
           fi
-      - name: Mirror APP manifest-list to Nexus
+      - name: Verify images exist on Hub
+        shell: bash
         run: |
           set -euo pipefail
-          SRC="docker://${DOCKERHUB_REPO_APP}:${TAG}"
-          DST="docker://${NEXUS_DOMAIN}/${NEXUS_REPO_APP}:${TAG}"
-          skopeo copy --all --override-os linux \
-            --src-creds "${DH_USER}:${DH_TOKEN}" \
-            --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
-            --src-tls-verify=true --dest-tls-verify=false \
-            "${SRC}" "${DST}"
-          skopeo copy --all --override-os linux \
-            --src-creds "${DH_USER}:${DH_TOKEN}" \
-            --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
-            --src-tls-verify=true --dest-tls-verify=false \
-            "${SRC}" "docker://${NEXUS_DOMAIN}/${NEXUS_REPO_APP}:latest"
-      - name: Mirror WEB manifest-list to Nexus
+          for IMG in "${DOCKERHUB_REPO_APP}:${TAG}" "${DOCKERHUB_REPO_WEB}:${TAG}"; do
+            echo "Checking $IMG"
+            if ! docker buildx imagetools inspect "$IMG" >/dev/null 2>&1; then
+              echo "::error::Image not found on Hub: $IMG"
+              exit 1
+            fi
+          done
+      - name: Mirror both images with skopeo
+        shell: bash
         run: |
           set -euo pipefail
-          SRC="docker://${DOCKERHUB_REPO_WEB}:${TAG}"
-          DST="docker://${NEXUS_DOMAIN}/${NEXUS_REPO_WEB}:${TAG}"
-          skopeo copy --all --override-os linux \
-            --src-creds "${DH_USER}:${DH_TOKEN}" \
-            --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
-            --src-tls-verify=true --dest-tls-verify=false \
-            "${SRC}" "${DST}"
-          skopeo copy --all --override-os linux \
-            --src-creds "${DH_USER}:${DH_TOKEN}" \
-            --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
-            --src-tls-verify=true --dest-tls-verify=false \
-            "${SRC}" "docker://${NEXUS_DOMAIN}/${NEXUS_REPO_WEB}:latest"
+          SRC_APP="docker://${DOCKERHUB_REPO_APP}:${TAG}"
+          SRC_WEB="docker://${DOCKERHUB_REPO_WEB}:${TAG}"
+          DST_APP="docker://${NEXUS_DOMAIN}/${NEXUS_REPO_APP}:${TAG}"
+          DST_WEB="docker://${NEXUS_DOMAIN}/${NEXUS_REPO_WEB}:${TAG}"
+          for S D in "$SRC_APP" "$DST_APP" "$SRC_WEB" "$DST_WEB"; do :; done
+          skopeo copy --src-creds "${DH_USER}:${DH_TOKEN}" --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
+                      --src-tls-verify=true --dest-tls-verify=false "${SRC_APP}" "${DST_APP}"
+          skopeo copy --src-creds "${DH_USER}:${DH_TOKEN}" --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
+                      --src-tls-verify=true --dest-tls-verify=false "${SRC_WEB}" "${DST_WEB}"
+          # Also tag latest
+          skopeo copy --src-creds "${DH_USER}:${DH_TOKEN}" --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
+                      --src-tls-verify=true --dest-tls-verify=false "${SRC_APP}" "docker://${NEXUS_DOMAIN}/${NEXUS_REPO_APP}:latest"
+          skopeo copy --src-creds "${DH_USER}:${DH_TOKEN}" --dest-creds "${NEXUS_USER}:${NEXUS_PASS}" \
+                      --src-tls-verify=true --dest-tls-verify=false "${SRC_WEB}" "docker://${NEXUS_DOMAIN}/${NEXUS_REPO_WEB}:latest"
 
+  # ----------------------------------------------------------
+  # Deploy to EC2 (kept for compatibility)
+  # ----------------------------------------------------------
   deploy-ec2:
     name: Deploy to EC2
     runs-on: ubuntu-latest
-    needs: [resolve-target, resolve-registry, setup, build-and-push-app, build-and-push-web, snyk-release, create-tag]
+    needs: [resolve-target, resolve-build-mode, build-and-push-app, build-and-push-web, snyk-release, create-tag]
     if: ${{ needs.resolve-target.outputs.target == 'ec2' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
     steps:
-      - run: echo "EC2 flow currently disabled; target=ec2 would run here."
+      - run: echo "EC2 flow skipped/placeholder."
 
-  # Deploy ONE stack on Mac (default: pull from Hub; set DEPLOY_REGISTRY=nexus to pull from Nexus instead)
-  # If you *really* want two stacks at once, duplicate this job with a different COMPOSE_PROJECT_NAME and different repos.
-
-    # ----------------------------------------------------------
-    # Deploy to Mac (self-hosted) — supports Hub or local Nexus
-    # ----------------------------------------------------------
-
+  # ----------------------------------------------------------
+  # Deploy to Mac (self-hosted) — supports Hub or local Nexus
+  # ----------------------------------------------------------
   deploy-mac:
-
-      name: Deploy on Mac (self-hosted)
-      runs-on: [ self-hosted, macOS ]
-      needs: [ resolve-target, setup, build-and-push-app, build-and-push-web, snyk-release, create-tag ]
-      if: ${{ needs.resolve-target.outputs.target == 'mac' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
-      env:
-        # Version/tag to deploy
-        TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
-
-        # Hub repos + creds (org/repo secrets/vars)
-        DOCKERHUB_REPO_APP: ${{ secrets.DOCKERHUB_REPO_APP }}
-        DOCKERHUB_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}
-        DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
-        DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
-
-        # Switch to pull from Nexus by setting REGISTRY_KIND=nexus (otherwise "hub")
-        REGISTRY_KIND: ${{ vars.DEPLOY_REGISTRY }}
-
-        # Local Nexus on the Mac runner (secured Docker hosted repos)
-        NEXUS_DOMAIN: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}     # e.g. 127.0.0.1:5000
-        NEXUS_USER: ${{ secrets.NEXUS_USERNAME }}
-        NEXUS_PASS: ${{ secrets.NEXUS_PASSWORD }}
-        NEXUS_REPO_APP: ${{ secrets.NEXUS_REPO_APP }}          # e.g. supermario-service
-        NEXUS_REPO_WEB: ${{ secrets.NEXUS_REPO_WEB }}          # e.g. supermario-front
-
-        # App/DB runtime config
-        DB_NAME: ${{ vars.DB_NAME }}
-        DB_USER: ${{ vars.DB_USER }}
-        DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-        DB_PORT: ${{ vars.DB_PORT }}
-        FLASK_PORT: ${{ vars.FLASK_PORT }}
-        WEB_PORT: ${{ vars.WEB_PORT || '8082' }}
-
-      steps:
-        - uses: actions/checkout@v4
-
-        - name: Sanity - web/app repos are distinct
-          shell: bash
-          run: |
-            if [[ "${DOCKERHUB_REPO_WEB}" == "${DOCKERHUB_REPO_APP}" ]]; then
-              echo "DOCKERHUB_REPO_WEB equals DOCKERHUB_REPO_APP (${DOCKERHUB_REPO_WEB}). Fix your secrets." >&2
-              exit 1
-            fi
-
-        - name: Decide image sources (Hub or Nexus) & write .env.local
-          shell: bash
-          run: |
-            set -euo pipefail
-            mkdir -p mac-release-flow
-
-            # Decide image sources
-            if [[ "${REGISTRY_KIND:-hub}" == "nexus" ]]; then
-              IMAGE_REPO_APP="${NEXUS_DOMAIN}/${NEXUS_REPO_APP}"
-              IMAGE_REPO_WEB="${NEXUS_DOMAIN}/${NEXUS_REPO_WEB}"   # <-- web repo
-            else
-              IMAGE_REPO_APP="${DOCKERHUB_REPO_APP}"
-              IMAGE_REPO_WEB="${DOCKERHUB_REPO_WEB}"               # <-- web repo
-            fi
-
-            # Sanity
-            : "${IMAGE_REPO_APP:?IMAGE_REPO_APP is empty}"
-            : "${IMAGE_REPO_WEB:?IMAGE_REPO_WEB is empty}"
-            : "${TAG:?TAG is empty}"
-
-            # Write env file (now includes WEB_PORT)
-            cat > mac-release-flow/.env.local <<EOF
-            # --- image sources for compose ---
-            DOCKERHUB_REPO_APP=${IMAGE_REPO_APP}
-            DOCKERHUB_REPO_WEB=${IMAGE_REPO_WEB}
-            TAG=${TAG}
-            WEB_PORT=${WEB_PORT}
-
-            # --- app runtime env ---
-            DB_NAME=${DB_NAME}
-            DB_USER=${DB_USER}
-            DB_PASSWORD=${DB_PASSWORD}
-            DB_PORT=${DB_PORT}
-            FLASK_PORT=${FLASK_PORT}
-            EOF
-
-            echo "Using image sources:"
-            sed -n '1,8p' mac-release-flow/.env.local
-
-            # ---- VALIDATION (kept inside run block!) ----
-            WEB_IMAGE=$(docker compose \
-              --env-file mac-release-flow/.env.local \
-              -f mac-release-flow/deploy/compose.local.yml config \
-              | awk '/web:/{p=1} p&&/image:/{print $2; exit}')
-            echo "Resolved web image: ${WEB_IMAGE}"
-            case "$WEB_IMAGE" in
-              *supermario-front:*) echo "OK: web image looks correct." ;;
-              *) echo "ERROR: web image is not the front image (${WEB_IMAGE}). Check DOCKERHUB_REPO_WEB/NEXUS_REPO_WEB." >&2; exit 1 ;;
-            esac
-
-        - name: Login to Docker Hub (pull fallback)
-          if: ${{ env.DH_USER != '' && env.DH_TOKEN != '' }}
-          run: echo "${DH_TOKEN}" | docker login -u "${DH_USER}" --password-stdin
-
-        - name: Login to local Nexus registry (only if REGISTRY_KIND=nexus)
-          if: ${{ env.REGISTRY_KIND == 'nexus' && env.NEXUS_DOMAIN != '' && env.NEXUS_USER != '' && env.NEXUS_PASS != '' }}
-          run: echo "${NEXUS_PASS}" | docker login "${NEXUS_DOMAIN}" -u "${NEXUS_USER}" --password-stdin
-
-        - name: Ensure volume & resilient pre-pulls (Hub→Nexus fallback)
-          shell: bash
-          env:
-            FALLBACK_NEXUS_DOMAIN: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}
-            FALLBACK_NEXUS_USER: ${{ secrets.NEXUS_USERNAME }}
-            FALLBACK_NEXUS_PASS: ${{ secrets.NEXUS_PASSWORD }}
-            FALLBACK_NEXUS_APP: ${{ secrets.NEXUS_REPO_APP }}
-            FALLBACK_NEXUS_WEB: ${{ secrets.NEXUS_REPO_WEB }}
-          run: |
-            set -euo pipefail
-            docker volume create supermario_db_data >/dev/null
-
-            APP_REPO="$(grep '^DOCKERHUB_REPO_APP=' mac-release-flow/.env.local | cut -d= -f2)"
-            WEB_REPO="$(grep '^DOCKERHUB_REPO_WEB=' mac-release-flow/.env.local | cut -d= -f2)"
-
-            pull_or_note() {
-              local img="$1"
-              if docker pull "$img"; then
-                echo "::notice::Pulled $img"
-                return 0
-              fi
-              err="$(
-                docker pull "$img" 2>&1 >/dev/null || true
-              )"
-              if echo "$err" | grep -q 'pull rate limit'; then
-                echo "::warning::Rate limited pulling $img from Hub."
-                return 2
-              fi
-              echo "::warning::Could not pull $img; continuing (compose may still work if image is local)."
-              return 1
-            }
-
-            need_fallback=false
-            pull_or_note "${APP_REPO}:${TAG}" || [[ $? -eq 2 ]] && need_fallback=true
-            pull_or_note "${WEB_REPO}:${TAG}" || [[ $? -eq 2 ]] && need_fallback=true
-
-            if $need_fallback && [[ "${REGISTRY_KIND:-hub}" != "nexus" ]] \
-               && [[ -n "${FALLBACK_NEXUS_DOMAIN:-}" && -n "${FALLBACK_NEXUS_APP:-}" && -n "${FALLBACK_NEXUS_WEB:-}" ]]; then
-              echo "::notice::Falling back to Nexus for pulls…"
-              echo "${FALLBACK_NEXUS_PASS}" | docker login "${FALLBACK_NEXUS_DOMAIN}" -u "${FALLBACK_NEXUS_USER}" --password-stdin
-
-              docker pull "${FALLBACK_NEXUS_DOMAIN}/${FALLBACK_NEXUS_APP}:${TAG}" || true
-              docker pull "${FALLBACK_NEXUS_DOMAIN}/${FALLBACK_NEXUS_WEB}:${TAG}" || true
-            fi
-        
-
-        - name: Compose up on Mac (load env file explicitly)
-          run: |
-            docker compose \
-              --env-file mac-release-flow/.env.local \
-              -f mac-release-flow/deploy/compose.local.yml up -d --no-build
-            docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
-
-        - name: Post-deploy smoke tests
-          shell: bash
-          run: |
-            set -euo pipefail
-            curl -sf http://127.0.0.1:8000/health | jq -e '.status=="ok"' >/dev/null
-            curl -sI http://127.0.0.1:${WEB_PORT:-8082} | grep -q "200 OK"
-            echo "Smoke tests passed: API healthy and web serving 200."
-
-# ----------------------------------------------------------
-# Prepare local Minikube + Ingress + Argo CD (idempotent)
-# ----------------------------------------------------------
-
-  prepare-minikube:
-
-    name: Prepare Minikube & Argo CD
+    name: Deploy on Mac (self-hosted)
     runs-on: [ self-hosted, macOS ]
-    # run only on mac target, and on main or tags
+    needs: [resolve-target, resolve-build-mode, build-and-push-app, build-and-push-web, snyk-release, mirror-to-nexus, create-tag]
     if: ${{ needs.resolve-target.outputs.target == 'mac' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
-    needs: [ resolve-target ]   # so we can read target/mac decision
     env:
-      # cluster sizing (tweak as you like)
-      MK_CPUS: "4"
-      MK_MEMORY: "6g"
-      MK_DRIVER: docker
+      # Version/tag to deploy
+      TAG: ${{ needs.resolve-build-mode.outputs.IMAGE_TAG }}
 
-      # If you mirror to local Nexus and want k8s to pull from it:
-      REGISTRY_KIND: ${{ vars.DEPLOY_REGISTRY }}             # "nexus" or empty/"hub"
-      NEXUS_DOMAIN: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}     # e.g. 127.0.0.1:5000
-      NEXUS_USER: ${{ secrets.NEXUS_USERNAME }}
-      NEXUS_PASS: ${{ secrets.NEXUS_PASSWORD }}
-
-      # Optional Docker Hub creds (if your Hub repos are private)
+      # Hub repos + creds
+      DOCKERHUB_REPO_APP: ${{ secrets.DOCKERHUB_REPO_APP }}
+      DOCKERHUB_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}
       DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
       DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      # Namespaces used by your App-of-Apps chart
-      ARGO_NS: argocd
-      NS_BACKEND: mario-backend
-      NS_WEB: mario-web
-      NS_MON: monitoring
+      # Switch to pull from Nexus by setting DEPLOY_REGISTRY=nexus
+      REGISTRY_KIND: ${{ vars.DEPLOY_REGISTRY }}
 
-      # Argo CD version (pin a stable)
-      ARGO_VERSION: "v2.11.7"
+      # Local Nexus on the Mac
+      NEXUS_DOMAIN: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}     # e.g. 127.0.0.1:5000
+      NEXUS_USER: ${{ secrets.NEXUS_USERNAME }}
+      NEXUS_PASS: ${{ secrets.NEXUS_PASSWORD }}
+      NEXUS_REPO_APP: ${{ secrets.NEXUS_REPO_APP }}
+      NEXUS_REPO_WEB: ${{ secrets.NEXUS_REPO_WEB }}
+
+      # App/DB runtime config
+      DB_NAME: ${{ vars.DB_NAME }}
+      DB_USER: ${{ vars.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_PORT: ${{ vars.DB_PORT }}
+      FLASK_PORT: ${{ vars.FLASK_PORT }}
+      WEB_PORT: ${{ vars.WEB_PORT || '8082' }}
 
     steps:
       - uses: actions/checkout@v4
 
+      - name: Decide image sources (Hub or Nexus) & write .env.local
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p mac-release-flow
+
+          if [[ "${REGISTRY_KIND:-hub}" == "nexus" ]]; then
+            IMAGE_REPO_APP="${NEXUS_DOMAIN}/${NEXUS_REPO_APP}"
+            IMAGE_REPO_WEB="${NEXUS_DOMAIN}/${NEXUS_REPO_WEB}"
+          else
+            IMAGE_REPO_APP="${DOCKERHUB_REPO_APP}"
+            IMAGE_REPO_WEB="${DOCKERHUB_REPO_WEB}"
+          fi
+
+          : "${IMAGE_REPO_APP:?IMAGE_REPO_APP is empty}"
+          : "${IMAGE_REPO_WEB:?IMAGE_REPO_WEB is empty}"
+          : "${TAG:?TAG is empty}"
+
+          cat > mac-release-flow/.env.local <<EOF
+          DOCKERHUB_REPO_APP=${IMAGE_REPO_APP}
+          DOCKERHUB_REPO_WEB=${IMAGE_REPO_WEB}
+          TAG=${TAG}
+          WEB_PORT=${WEB_PORT}
+          DB_NAME=${DB_NAME}
+          DB_USER=${DB_USER}
+          DB_PASSWORD=${DB_PASSWORD}
+          DB_PORT=${DB_PORT}
+          FLASK_PORT=${FLASK_PORT}
+          EOF
+
+          echo "Using image sources:"
+          sed -n '1,8p' mac-release-flow/.env.local
+
+      - name: Login to Docker Hub (pull fallback)
+        if: ${{ env.DH_USER != '' && env.DH_TOKEN != '' }}
+        run: echo "${DH_TOKEN}" | docker login -u "${DH_USER}" --password-stdin
+
+      - name: Login to local Nexus registry (only if REGISTRY_KIND=nexus)
+        if: ${{ env.REGISTRY_KIND == 'nexus' && env.NEXUS_DOMAIN != '' && env.NEXUS_USER != '' && env.NEXUS_PASS != '' }}
+        run: echo "${NEXUS_PASS}" | docker login "${NEXUS_DOMAIN}" -u "${NEXUS_USER}" --password-stdin
+
+      - name: Ensure volume & pre-pull images (best effort)
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker volume create supermario_db_data >/dev/null
+          APP_REPO="$(grep '^DOCKERHUB_REPO_APP=' mac-release-flow/.env.local | cut -d= -f2)"
+          WEB_REPO="$(grep '^DOCKERHUB_REPO_WEB=' mac-release-flow/.env.local | cut -d= -f2)"
+          docker pull "${APP_REPO}:${TAG}" || true
+          docker pull "${WEB_REPO}:${TAG}" || true
+
+      - name: Compose up on Mac
+        run: |
+          docker compose \
+            --env-file mac-release-flow/.env.local \
+            -f mac-release-flow/deploy/compose.local.yml up -d --no-build
+          docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+
+  # ----------------------------------------------------------
+  # Prepare Minikube (no downgrade) + Argo CD (idempotent)
+  # ----------------------------------------------------------
+  prepare-minikube:
+    name: Prepare Minikube & Argo CD
+    runs-on: [ self-hosted, macOS ]
+    if: ${{ needs.resolve-target.outputs.target == 'mac' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
+    needs: [resolve-target]
+    env:
+      MK_CPUS: "4"
+      MK_MEMORY: "6g"
+      MK_DRIVER: docker
+      ARGO_NS: argocd
+      ARGO_VERSION: "v2.11.7"
+    steps:
+      - uses: actions/checkout@v4
       - name: Ensure kubectl, helm, minikube
         shell: bash
         run: |
           set -euo pipefail
-          # Homebrew is already on the self-hosted Mac; avoid reinstalling
-          brew update || true
-          brew list --versions kubernetes-cli >/dev/null 2>&1 || brew install kubernetes-cli
-          brew list --versions helm           >/dev/null 2>&1 || brew install helm
-          brew list --versions minikube       >/dev/null 2>&1 || brew install minikube
-          
-          kubectl version --client --output=yaml || true
-          helm version || true
-          minikube version || true
-
+          command -v kubectl  >/dev/null || brew install kubernetes-cli
+          command -v helm     >/dev/null || brew install helm
+          command -v minikube >/dev/null || brew install minikube
+          kubectl version --client=true
+          helm version
+          minikube version
       - name: Start/ensure Minikube (reuse existing; no downgrade)
+        id: mkstart
         shell: bash
         env:
           MK_PROFILE: ${{ vars.MINIKUBE_PROFILE || 'minikube' }}
-          MK_DRIVER: ${{ vars.MINIKUBE_DRIVER  || 'docker' }}
-          MK_CPUS: ${{ vars.MINIKUBE_CPUS    || '4' }}
-          MK_MEMORY: ${{ vars.MINIKUBE_MEMORY  || '6g' }}
-          # Leave unset in repo vars to reuse the existing cluster version.
+          MK_DRIVER:  ${{ vars.MINIKUBE_DRIVER  || 'docker' }}
+          MK_CPUS:    ${{ vars.MINIKUBE_CPUS    || '4' }}
+          MK_MEMORY:  ${{ vars.MINIKUBE_MEMORY  || '6g' }}
           MK_K8S_VER: ${{ vars.MINIKUBE_K8S_VERSION }}
         run: |
           set -euo pipefail
           echo "Profile=${MK_PROFILE}; driver=${MK_DRIVER}; cpus=${MK_CPUS}; mem=${MK_MEMORY}; requested_k8s=${MK_K8S_VER:-<none>}"
-
-          is_running() {
-            minikube status -p "${MK_PROFILE}" --output=json 2>/dev/null | grep -q '"Host": "Running"'
-          }
-
+          is_running() { minikube status -p "${MK_PROFILE}" --output=json 2>/dev/null | grep -q '"Host": "Running"'; }
           current_version() {
-            minikube -p "${MK_PROFILE}" kubectl -- \
-              get nodes -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}' 2>/dev/null || true
+            minikube -p "${MK_PROFILE}" kubectl -- get nodes -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}' 2>/dev/null || true
           }
-
           if is_running; then
             CUR_VER="$(current_version)"
             echo "Minikube already running. Current k8s: ${CUR_VER:-unknown}"
@@ -602,271 +545,84 @@ jobs:
               minikube start -p "${MK_PROFILE}" --driver="${MK_DRIVER}" --cpus="${MK_CPUS}" --memory="${MK_MEMORY}"
             fi
           fi
-
           kubectl config use-context "${MK_PROFILE}" >/dev/null 2>&1 || true
           kubectl get nodes -o wide || true
-
-      - name: Enable addons (ingress, metrics) — idempotent
+      - name: Enable addons (ingress, metrics)
         shell: bash
-        env:
-          MK_PROFILE: ${{ vars.MINIKUBE_PROFILE || 'minikube' }}
         run: |
           set -euo pipefail
-
-          # Skip gracefully if Minikube isn't up
-          if ! minikube status -p "${MK_PROFILE}" --output=json 2>/dev/null | grep -q '"Host": "Running"'; then
-            echo "::warning::Minikube profile '${MK_PROFILE}' is not running; skipping addon enable."
-            exit 0
-          fi
-
-          enable_if_needed () {
-            local addon="$1"
-            # Check current state
-            if minikube addons list -p "${MK_PROFILE}" | awk -v a="$addon" '$1==a{print tolower($2)}' | grep -qE 'enabled|true'; then
-              echo "Addon '${addon}' already enabled."
-            else
-              minikube addons enable -p "${MK_PROFILE}" "${addon}"
-            fi
-          }
-
-          enable_if_needed ingress
-          enable_if_needed metrics-server
-
-          # Wait for ingress controller only if the namespace exists
-          if kubectl get ns ingress-nginx >/dev/null 2>&1; then
-            kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s \
-              || echo "::warning::ingress-nginx-controller not Ready yet."
-          fi
-
-      - name: (Optional) Create imagePullSecrets for private registries
-        run: |
-          set -euo pipefail
-
-          create_secret() {
-            local ns="$1" name="$2" server="$3" user="$4" pass="$5"
-            kubectl get ns "$ns" >/dev/null 2>&1 || kubectl create ns "$ns"
-            if kubectl -n "$ns" get secret "$name" >/dev/null 2>&1; then
-              echo "Secret $name already exists in $ns, patching…"
-              kubectl -n "$ns" delete secret "$name" --ignore-not-found
-            fi
-            kubectl -n "$ns" create secret docker-registry "$name" \
-              --docker-server="$server" --docker-username="$user" --docker-password="$pass"
-          }
-
-          # Docker Hub (if private)
-          if [[ -n "${DH_USER:-}" && -n "${DH_TOKEN:-}" ]]; then
-            for ns in "$NS_BACKEND" "$NS_WEB"; do
-              create_secret "$ns" "regcred-hub" "https://index.docker.io/v1/" "$DH_USER" "$DH_TOKEN"
-            done
-            echo "::notice::Created/updated Docker Hub imagePullSecrets in backend/web namespaces."
-          fi
-
-          # Local Nexus (if used)
-          if [[ "${REGISTRY_KIND:-hub}" == "nexus" && -n "${NEXUS_DOMAIN:-}" && -n "${NEXUS_USER:-}" && -n "${NEXUS_PASS:-}" ]]; then
-            for ns in "$NS_BACKEND" "$NS_WEB"; do
-              create_secret "$ns" "regcred-nexus" "http://${NEXUS_DOMAIN}" "$NEXUS_USER" "$NEXUS_PASS"
-            done
-            echo "::notice::Created/updated Nexus imagePullSecrets in backend/web namespaces."
-          fi
-
+          minikube addons enable ingress
+          minikube addons enable metrics-server
+          kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s || \
+          kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller-admission --timeout=180s || true
       - name: Install/upgrade Argo CD (server as LoadBalancer)
+        shell: bash
         run: |
           set -euo pipefail
           kubectl get ns "${ARGO_NS}" >/dev/null 2>&1 || kubectl create ns "${ARGO_NS}"
-
-          if ! kubectl -n "${ARGO_NS}" get deploy | grep -q '^argocd-server'; then
+          if ! kubectl -n "${ARGO_NS}" get deploy | grep -q argocd-server; then
             echo "Installing Argo CD ${ARGO_VERSION}…"
             kubectl -n "${ARGO_NS}" apply -f "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGO_VERSION}/manifests/install.yaml"
+            kubectl -n "${ARGO_NS}" patch svc argocd-server -p '{"spec":{"type":"LoadBalancer"}}' || true
           else
-            echo "Argo CD already present; ensuring desired svc type…"
+            echo "Argo CD already installed; ensuring LoadBalancer service…"
+            kubectl -n "${ARGO_NS}" patch svc argocd-server -p '{"spec":{"type":"LoadBalancer"}}' --type=merge || true
           fi
-
-          # Expose the UI via LoadBalancer (works with `minikube tunnel`)
-          kubectl -n "${ARGO_NS}" patch svc argocd-server -p '{"spec":{"type":"LoadBalancer"}}' --type=merge || true
-
-          echo "Waiting for Argo CD components…"
-          kubectl -n "${ARGO_NS}" rollout status deploy/argocd-server --timeout=180s
-          kubectl -n "${ARGO_NS}" rollout status deploy/argocd-repo-server --timeout=180s
-
-          # Controller may be a StatefulSet in most versions (v2.6+)
-          if kubectl -n "${ARGO_NS}" get statefulset argocd-application-controller >/dev/null 2>&1; then
-            kubectl -n "${ARGO_NS}" rollout status statefulset/argocd-application-controller --timeout=300s
-          elif kubectl -n "${ARGO_NS}" get deploy argocd-application-controller >/dev/null 2>&1; then
-            kubectl -n "${ARGO_NS}" rollout status deploy/argocd-application-controller --timeout=300s
-          else
-            echo "WARN: couldn't find application controller (neither sts nor deploy) — printing pods:"
-            kubectl -n "${ARGO_NS}" get pods -o wide || true
-            exit 1
-          fi
-
-          echo "::group::Argo CD objects"
-          kubectl -n "${ARGO_NS}" get deploy,sts,svc,pods -o wide
-          echo "::endgroup::"
-
+          kubectl -n "${ARGO_NS}" rollout status deploy/argocd-server --timeout=180s || true
+          kubectl -n "${ARGO_NS}" rollout status deploy/argocd-repo-server --timeout=180s || true
+          kubectl -n "${ARGO_NS}" rollout status deploy/argocd-application-controller --timeout=180s || \
+          kubectl -n "${ARGO_NS}" rollout status statefulset/argocd-application-controller --timeout=180s || true
           echo "::notice::Argo CD admin password:"
-          kubectl -n "${ARGO_NS}" get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -D 2>/dev/null || base64 -d 2>/dev/null || true
+          kubectl -n "${ARGO_NS}" get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d || true
           echo
-      
-
-      - name: Reminder for LoadBalancers
+      - name: Add /etc/hosts for test domains (best effort)
+        shell: bash
         run: |
-          echo "::notice::If you use LoadBalancer Services (Argo CD, etc.), run 'minikube tunnel' on the host to allocate external IPs."
+          set -euo pipefail
+          IP="$(minikube ip || echo 127.0.0.1)"
+          HOSTS=(web.mario.local api.mario.local grafana.mario.local prometheus.mario.local alertmanager.mario.local)
+          for h in "${HOSTS[@]}"; do
+            if ! grep -qE "[[:space:]]$h(\$|[[:space:]])" /etc/hosts; then
+              echo "$IP $h" | sudo tee -a /etc/hosts >/dev/null || true
+            fi
+          done
 
-# ----------------------------------------------------------
-# Deploy to local minikube with Argo CD (App-of-Apps)
-# ----------------------------------------------------------
+  # ----------------------------------------------------------
+  # Deploy to local minikube with Argo CD (App-of-Apps)
+  # ----------------------------------------------------------
   k8s-argocd-minikube:
-
     name: Minikube + Argo CD (App-of-Apps)
     runs-on: [ self-hosted, macOS ]
-    needs: [ resolve-target, setup, build-and-push-app, build-and-push-web, snyk-release ]
-    if: ${{ (needs.resolve-target.outputs.target || 'mac') == 'mac'
-      && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
+    needs: [resolve-target, resolve-build-mode, prepare-minikube]
+    if: ${{ needs.resolve-target.outputs.target == 'mac' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
     env:
-      TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
-
-      # Namespaces
+      TAG: ${{ needs.resolve-build-mode.outputs.IMAGE_TAG }}
       ARGO_NS: argocd
-      APP_NS: supermario
-
-      # If you ever want to override repos, set these as org/repo vars or secrets
-      DOCKERHUB_REPO_APP: ${{ secrets.DOCKERHUB_REPO_APP }}   # e.g. itaef/supermario-service
-      DOCKERHUB_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}   # e.g. itaef/supermario-front
     steps:
       - uses: actions/checkout@v4
-
-      - name: Ensure Minikube up (no version pin)
+      - name: Install/Upgrade App-of-Apps (Helm)
         shell: bash
         run: |
           set -euo pipefail
-          if ! minikube status --output=json 2>/dev/null | grep -q '"Host": "Running"'; then
-            echo "Starting Minikube without --kubernetes-version (reuses default/current)…"
-            minikube start --driver=docker
-            minikube addons enable metrics-server || true
-          else
-            echo "Minikube already running."
-          fi
-          kubectl config use-context minikube >/dev/null 2>&1 || true
-          kubectl get nodes -o wide || true
-
-      - name: Reminder - run tunnel locally
-        run: echo "If your Services use LoadBalancer, ensure 'minikube tunnel' is running on the Mac host."
-
-      - name: Install kubectl, helm, minikube (idempotent)
-        # brew is present on the Mac runner; this is safe to re-run
-        shell: bash
-        run: |
-          set -euo pipefail
-          brew list --versions kubectl  >/dev/null 2>&1 || brew install kubectl
-          brew list --versions helm     >/dev/null 2>&1 || brew install helm
-          brew list --versions minikube >/dev/null 2>&1 || brew install minikube
-          kubectl version --client=true
-          helm version
-          minikube version
-
-      - name: Start minikube (reuse existing; no downgrade)
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! minikube status --output=json 2>/dev/null | grep -q '"Host": "Running"'; then
-            minikube start --driver=docker --cpus=4 --memory=6g || true
-          else
-            echo "Minikube already running."
-          fi
-          kubectl config use-context minikube >/dev/null 2>&1 || true
-          kubectl get nodes -o wide || true
-
-      - name: Install/Upgrade Argo CD via Helm (match existing release name)
-        shell: bash
-        env:
-          ARGO_NS: argocd
-        run: |
-          set -euo pipefail
-          kubectl get ns "${ARGO_NS}" >/dev/null 2>&1 || kubectl create ns "${ARGO_NS}"
-
-          helm repo add argo https://argoproj.github.io/argo-helm || true
-          helm repo update
-
-          # Use release name "argocd" to match existing resource annotations
-          RELEASE=argocd
-
-          helm upgrade --install "${RELEASE}" argo/argo-cd \
-            -n "${ARGO_NS}" \
-            --create-namespace \
-            --set server.service.type=NodePort \
-            --set configs.params."server.insecure"=true \
-            --wait --atomic
-
-          kubectl -n "${ARGO_NS}" get pods
-        
-
-      - name: Deploy App-of-Apps (points to infra/helm/argocd-apps)
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Your CI already bumps Chart.appVersion and writes argocd-apps/values.yaml.global.releaseTag
-          # We additionally pass TAG explicitly to be crystal clear:
+          # IMPORTANT: Do NOT pre-create mario-backend/mario-web/monitoring here.
+          # The argocd-apps chart contains Namespace manifests and should own them.
           helm upgrade --install argocd-apps ./infra/helm/argocd-apps \
             -n "${ARGO_NS}" \
             -f ./infra/helm/argocd-apps/values.yaml \
             --set global.releaseTag="${TAG}" \
             --wait
-          # Show created Argo CD Applications
           kubectl -n "${ARGO_NS}" get applications.argoproj.io -o wide || true
 
-      - name: Wait for app workloads to become Ready
-        shell: bash
-        run: |
-          set -euo pipefail
-          # If your Application sets syncPolicy: automated, Argo will create Deployments/Services.
-          # Wait for the backend + web Deployments (names must match your chart Release/metadata)
-          # Adjust names if your charts use different .Release.Name:
-          kubectl -n "${APP_NS}" rollout status deploy/backend --timeout=300s
-          kubectl -n "${APP_NS}" rollout status deploy/web     --timeout=300s
-          kubectl -n "${APP_NS}" get svc -o wide
-          kubectl -n "${APP_NS}" get deploy,pod -o wide
-
-      - name: Print access URLs (NodePort / minikube service)
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "web service URLs:"
-          minikube service -n "${APP_NS}" web --url || true
-          echo "backend service URLs:"
-          minikube service -n "${APP_NS}" backend --url || true
-          echo "Argo CD server URL (NodePort):"
-          kubectl -n "${ARGO_NS}" get svc argo-cd-argocd-server -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}'; echo
-          echo "Open: http://$(minikube ip):$(kubectl -n ${ARGO_NS} get svc argo-cd-argocd-server -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}')"
-
-      - name: Snapshot cluster state (artifact)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: k8s-state
-          path: |
-            **/infra/helm/argocd-apps/values.yaml
-        # also dump kubernetes objects into a file for debugging
-      - name: Dump k8s objects
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          kubectl get all -A -o wide > k8s-all.txt || true
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: k8s-all
-          path: k8s-all.txt
-
-# ----------------------------------------------------------
-# Slack summaries (global) and sender
-# ----------------------------------------------------------
+  # ----------------------------------------------------------
+  # Slack summaries (global + minikube-only) and sender
+  # ----------------------------------------------------------
   summarize-status:
     name: Summarize results for Slack
     if: ${{ always() }}
     runs-on: ubuntu-latest
     needs:
       - resolve-target
+      - resolve-build-mode
       - build-and-push-app
       - build-and-push-web
       - snyk-release
@@ -880,58 +636,71 @@ jobs:
       message: ${{ steps.sum.outputs.message }}
     env:
       TARGET: ${{ needs.resolve-target.outputs.target || 'mac' }}
-      RES_BUILD_APP: ${{ needs['build-and-push-app'].result      || 'skipped' }}
-      RES_BUILD_WEB: ${{ needs['build-and-push-web'].result      || 'skipped' }}
-      RES_SNYK: ${{ needs['snyk-release'].result            || 'skipped' }}
-      RES_MIRROR: ${{ needs['mirror-to-nexus'].result         || 'skipped' }}
-      RES_PREP: ${{ needs['prepare-minikube'].result        || 'skipped' }}
-      RES_DEP_MAC: ${{ needs['deploy-mac'].result              || 'skipped' }}
-      RES_DEP_EC2: ${{ needs['deploy-ec2'].result              || 'skipped' }}
-      RES_ARGO_MINI: ${{ needs['k8s-argocd-minikube'].result     || 'skipped' }}
+      BUILD_IMAGES: ${{ needs.resolve-build-mode.outputs.BUILD_IMAGES || 'true' }}
+      RES_BUILD_APP: ${{ needs['build-and-push-app'].result   || 'skipped' }}
+      RES_BUILD_WEB: ${{ needs['build-and-push-web'].result   || 'skipped' }}
+      RES_SNYK:      ${{ needs['snyk-release'].result         || 'skipped' }}
+      RES_MIRROR:    ${{ needs['mirror-to-nexus'].result      || 'skipped' }}
+      RES_PREP:      ${{ needs['prepare-minikube'].result     || 'skipped' }}
+      RES_DEPLOY_MAC: ${{ needs['deploy-mac'].result || 'skipped' }}
+      RES_DEPLOY_EC2: ${{ needs['deploy-ec2'].result || 'skipped' }}
+      RES_ARGO_MINI: ${{ needs['k8s-argocd-minikube'].result  || 'skipped' }}
     steps:
       - id: sum
-        # Important: do NOT use `-e` here so this step never fails
+        name: Build Slack status/message
+        if: ${{ always() }}
         shell: bash
         run: |
           set -u
+          note=""
+          if [[ "${BUILD_IMAGES}" != "true" ]]; then
+            note="(builds skipped; using existing images)"
+          fi
           failures=()
           add_if_fail () { local n="$1" v="$2"; [[ "$v" == "failure" ]] && failures+=("$n"); }
-
           add_if_fail "build-and-push-app" "$RES_BUILD_APP"
           add_if_fail "build-and-push-web" "$RES_BUILD_WEB"
           add_if_fail "snyk-release"       "$RES_SNYK"
-
           if [[ "${TARGET:-mac}" == "mac" ]]; then
-            add_if_fail "mirror-to-nexus"       "$RES_MIRROR"
-            add_if_fail "prepare-minikube"      "$RES_PREP"
-            add_if_fail "deploy-mac"            "$RES_DEP_MAC"
-            add_if_fail "k8s-argocd-minikube"   "$RES_ARGO_MINI"
+            add_if_fail "mirror-to-nexus"     "$RES_MIRROR"
+            add_if_fail "prepare-minikube"    "$RES_PREP"
+            add_if_fail "deploy-mac"          "$RES_DEPLOY_MAC"
+            add_if_fail "k8s-argocd-minikube" "$RES_ARGO_MINI"
           else
-            add_if_fail "deploy-ec2"            "$RES_DEP_EC2"
+            add_if_fail "deploy-ec2"          "$RES_DEPLOY_EC2"
           fi
-
           if ((${#failures[@]})); then
             echo "status=failure" >> "$GITHUB_OUTPUT"
-            printf 'message=❌ Failed steps: %s · target=%s\n' "${failures[*]}" "${TARGET:-?}" >> "$GITHUB_OUTPUT"
+            printf "message=❌ Failed steps: %s · target=%s %s\n" "${failures[*]}" "${TARGET:-?}" "$note" >> "$GITHUB_OUTPUT"
           else
             echo "status=success" >> "$GITHUB_OUTPUT"
-            printf 'message=✅ All steps succeeded · target=%s\n' "${TARGET:-?}" >> "$GITHUB_OUTPUT"
+            printf "message=✅ All steps succeeded · target=%s %s\n" "${TARGET:-?}" "$note" >> "$GITHUB_OUTPUT"
           fi
-
-          # Never fail this step
           exit 0
 
   notify-slack:
     name: notify-slack / send
     if: ${{ always() }}
     needs:
-      - setup
+      - resolve-target
+      - resolve-build-mode
+      - compute-tag
+      - bump-helm-appversion
+      - create-tag
+      - build-and-push-app
+      - build-and-push-web
+      - snyk-release
+      - mirror-to-nexus
+      - deploy-ec2
+      - deploy-mac
+      - prepare-minikube
+      - k8s-argocd-minikube
       - summarize-status
     uses: tAIness/devops-ci-lib/.github/workflows/slack-notify.yml@main
     secrets: inherit
     with:
-      title: "Release: ${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
+      title: "Release: ${{ needs.resolve-build-mode.outputs.IMAGE_TAG || github.ref_name }}"
       status: ${{ needs.summarize-status.outputs.status }}
-      message: ${{ needs.summarize-status.outputs.message }}
       only_on: "always"
       run_url: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      message: "${{ needs.summarize-status.outputs.message }}"
