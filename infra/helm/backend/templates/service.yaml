@@ -1,11 +1,20 @@
-# templates/service.yaml
+# devops-project1/infra/helm/backend/templates/service.yaml
+{{- $name := default .Chart.Name .Values.nameOverride -}}
 apiVersion: v1
 kind: Service
 metadata:
   name: app-svc
+  labels:
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/instance: backend
 spec:
-  selector: { app: mario-app }
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/instance: backend
   ports:
     - name: http
-      port: {{ .Values.service.port }}
+      port: {{ .Values.service.port }}   # 8000
       targetPort: {{ .Values.service.port }}
+      protocol: TCP
+

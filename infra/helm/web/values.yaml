@@ -1,4 +1,4 @@
-  # /devops-project1/infra/helm/web/values.yaml
+  # devops-project1/infra/helm/web/values.yaml
   image:
     repository: docker.io/itaef/supermario-front
     tag: ""                 # use .Chart.AppVersion

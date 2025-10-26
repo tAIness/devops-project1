@@ -1,20 +1,28 @@
+# devops-project1/infra/helm/web/templates/deployment.yaml
 apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: web
   namespace: {{ .Release.Namespace }}
-  labels: { app: mario-web }
+  labels:
+    app: mario-web
 spec:
   replicas: {{ .Values.replicas | default 1 }}
   selector:
-    matchLabels: { app: mario-web }
+    matchLabels:
+      app: mario-web
   template:
     metadata:
-      labels: { app: mario-web }
+      labels:
+        app: mario-web
       annotations:
         # roll pods when config changes
         checksum/nginx: {{ include (print .Template.BasePath "/configmap.yaml") . | sha256sum }}
     spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
       containers:
         - name: web
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
@@ -23,20 +31,18 @@ spec:
             - containerPort: {{ .Values.service.port | default 80 }}
 
           livenessProbe:
-            httpGet: { path: /health, port: {{ .Values.service.port | default 80 }} }
+            httpGet:
+              path: /health
+              port: {{ .Values.service.port | default 80 }}
             initialDelaySeconds: 5
             periodSeconds: 10
-            timeoutSeconds: 1
-            successThreshold: 1
-            failureThreshold: 3
 
           readinessProbe:
-            httpGet: { path: /health, port: {{ .Values.service.port | default 80 }} }
+            httpGet:
+              path: /health
+              port: {{ .Values.service.port | default 80 }}
             initialDelaySeconds: 3
             periodSeconds: 5
-            timeoutSeconds: 1
-            successThreshold: 1
-            failureThreshold: 3
 
           {{- with .Values.env }}
           env:
@@ -57,4 +63,4 @@ spec:
       volumes:
         - name: web-nginx
           configMap:
-            name: web-nginx
+            name: {{ .Values.nginx.configMapName | default "web-nginx" }}

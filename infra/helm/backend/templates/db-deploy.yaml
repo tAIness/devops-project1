@@ -1,3 +1,4 @@
+# devops-project1/infra/helm/backend/templates/db-deploy.yaml
 {{- $db := (get .Values "db") | default (dict) -}}
 {{- if (get $db "enabled" | default false) }}
 apiVersion: apps/v1

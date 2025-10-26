@@ -1,4 +1,4 @@
-# templates/db-svc.yaml
+# devops-project1/infra/helm/backend/templates/db-svc.yaml
 {{- $db := (get .Values "db") | default (dict) -}}
 {{- if (get $db "enabled" | default false) }}
 apiVersion: v1

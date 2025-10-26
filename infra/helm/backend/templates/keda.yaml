@@ -1,3 +1,4 @@
+# devops-project1/infra/helm/backend/templates/keda.yaml
 {{- /*
 KEDA resources (no _helpers.tpl). Put this in templates/keda.yaml
 Relies on .Values.autoscaling.mode == "keda"
