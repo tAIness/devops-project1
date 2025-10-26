@@ -3,7 +3,8 @@ global:
   argoNamespace: argocd
   repoURL: https://github.com/tAIness/devops-project1.git
   targetRevision: main
-  releaseTag: "v1.0.171"
+
+  releaseTag: ""
 
 project:
   enabled: true
@@ -55,6 +56,7 @@ apps:
       ingress:
         enabled: true
         host: web.mario.local
+
 
 helmApps:
   # Install KEDA first so ScaledObject CRDs exist
@@ -130,3 +132,5 @@ secrets:
     stringData:
       admin-user: admin
       admin-password: admin
+
+
