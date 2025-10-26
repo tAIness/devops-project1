@@ -778,8 +778,7 @@ jobs:
 # Slack - Notify
 # ----------------------------------------------------------
 
-  nootify-slack:
-
+  notify-slack:
     if: ${{ always() }}
     needs:
       - resolve-target
@@ -792,27 +791,28 @@ jobs:
       - build-and-push-web
       - snyk-release
       - mirror-to-nexus
-      - prepare-minikube      # <-- add
+      - prepare-minikube
       - deploy-ec2
       - deploy-mac
       - k8s-argocd-minikube
-
     uses: tAIness/devops-ci-lib/.github/workflows/slack-notify.yml@main
     secrets: inherit
     with:
       title: "Release: ${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
+      # If any required step failed => 'failure', else 'success'
       status: >-
         ${{ (
           needs['build-and-push-app'].result == 'failure' ||
           needs['build-and-push-web'].result == 'failure' ||
           needs['snyk-release'].result == 'failure' ||
           (needs.resolve-target.outputs.target == 'mac' && (
-              needs['mirror-to-nexus'].result == 'failure' ||
-              needs['prepare-minikube'].result == 'failure' ||   # <-- add
-              needs['deploy-mac'].result == 'failure' ||
-              needs['k8s-argocd-minikube'].result == 'failure'
+            needs['mirror-to-nexus'].result == 'failure' ||
+            needs['prepare-minikube'].result == 'failure' ||
+            needs['deploy-mac'].result == 'failure' ||
+            needs['k8s-argocd-minikube'].result == 'failure'
           )) ||
-          (needs.resolve-target.outputs.target == 'ec2' && needs['deploy-ec2'].result == 'failure')
+          (needs.resolve-target.outputs.target == 'ec2' &&
+            needs['deploy-ec2'].result == 'failure')
         ) && 'failure' || 'success' }}
       only_on: "always"
       run_url: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
