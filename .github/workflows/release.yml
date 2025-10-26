@@ -494,6 +494,7 @@ jobs:
       - mirror-to-nexus
       - deploy-ec2
       - deploy-mac
+
     uses: tAIness/devops-ci-lib/.github/workflows/slack-notify.yml@main
     secrets: inherit
     with:
