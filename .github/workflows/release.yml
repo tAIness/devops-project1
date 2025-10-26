@@ -593,43 +593,40 @@ jobs:
         run: |
           set -euo pipefail
           kubectl get ns "${ARGO_NS}" >/dev/null 2>&1 || kubectl create ns "${ARGO_NS}"
-          kubectl -n "${ARGO_NS}" get deploy/argocd-server >/dev/null 2>&1 || true
 
-          # Install if not present; upgrade if present
-          if ! kubectl -n "${ARGO_NS}" get deploy | grep -q argocd-server; then
+          if ! kubectl -n "${ARGO_NS}" get deploy | grep -q '^argocd-server'; then
             echo "Installing Argo CD ${ARGO_VERSION}…"
             kubectl -n "${ARGO_NS}" apply -f "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGO_VERSION}/manifests/install.yaml"
-            # Patch service to LoadBalancer (works with `minikube tunnel`)
-            kubectl -n "${ARGO_NS}" patch svc argocd-server -p '{"spec":{"type":"LoadBalancer"}}'
           else
-            echo "Argo CD already installed; ensuring LoadBalancer service…"
-            kubectl -n "${ARGO_NS}" patch svc argocd-server -p '{"spec":{"type":"LoadBalancer"}}' --type=merge || true
+            echo "Argo CD already present; ensuring desired svc type…"
           fi
 
+          # Expose the UI via LoadBalancer (works with `minikube tunnel`)
+          kubectl -n "${ARGO_NS}" patch svc argocd-server -p '{"spec":{"type":"LoadBalancer"}}' --type=merge || true
+
+          echo "Waiting for Argo CD components…"
           kubectl -n "${ARGO_NS}" rollout status deploy/argocd-server --timeout=180s
           kubectl -n "${ARGO_NS}" rollout status deploy/argocd-repo-server --timeout=180s
-          kubectl -n "${ARGO_NS}" rollout status deploy/argocd-application-controller --timeout=180s
+
+          # Controller may be a StatefulSet in most versions (v2.6+)
+          if kubectl -n "${ARGO_NS}" get statefulset argocd-application-controller >/dev/null 2>&1; then
+            kubectl -n "${ARGO_NS}" rollout status statefulset/argocd-application-controller --timeout=300s
+          elif kubectl -n "${ARGO_NS}" get deploy argocd-application-controller >/dev/null 2>&1; then
+            kubectl -n "${ARGO_NS}" rollout status deploy/argocd-application-controller --timeout=300s
+          else
+            echo "WARN: couldn't find application controller (neither sts nor deploy) — printing pods:"
+            kubectl -n "${ARGO_NS}" get pods -o wide || true
+            exit 1
+          fi
+
+          echo "::group::Argo CD objects"
+          kubectl -n "${ARGO_NS}" get deploy,sts,svc,pods -o wide
+          echo "::endgroup::"
 
           echo "::notice::Argo CD admin password:"
-          kubectl -n "${ARGO_NS}" get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d || true
+          kubectl -n "${ARGO_NS}" get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -D 2>/dev/null || base64 -d 2>/dev/null || true
           echo
-
-      - name: (Optional) Add /etc/hosts for Ingress test domains
-        run: |
-          set -euo pipefail
-          # Resolve minikube IP
-          IP="$(minikube ip)"
-          echo "Minikube IP is: $IP"
-          # Add hostnames you use in your Helm values (web.mario.local, api.mario.local, grafana.mario.local, etc.)
-          HOSTS=(web.mario.local api.mario.local grafana.mario.local prometheus.mario.local alertmanager.mario.local)
-          for h in "${HOSTS[@]}"; do
-            if ! grep -qE "[[:space:]]$h(\$|[[:space:]])" /etc/hosts; then
-              echo "Adding $h -> $IP to /etc/hosts"
-              echo "$IP $h" | sudo tee -a /etc/hosts >/dev/null
-            else
-              echo "$h already present in /etc/hosts"
-            fi
-          done
+      
 
       - name: Reminder for LoadBalancers
         run: |
@@ -779,64 +776,78 @@ jobs:
 # ----------------------------------------------------------
 # Slack - Notify
 # ----------------------------------------------------------
-
   summarize-status:
-    name: Summarize job results
+    name: Summarize results for Slack
     if: ${{ always() }}
     runs-on: ubuntu-latest
     needs:
       - resolve-target
-      - resolve-registry
-      - compute-tag
-      - setup
-      - bump-helm-appversion
-      - create-tag
       - build-and-push-app
       - build-and-push-web
       - snyk-release
       - mirror-to-nexus
       - prepare-minikube
-      - deploy-ec2
       - deploy-mac
+      - deploy-ec2
       - k8s-argocd-minikube
     outputs:
-      status: ${{ steps.mk.outputs.status }}
-      message: ${{ steps.mk.outputs.message }}
+      status: ${{ steps.sum.outputs.status }}
+      message: ${{ steps.sum.outputs.message }}
+    env:
+      TARGET: ${{ needs.resolve-target.outputs.target || 'mac' }}
+      RES_BUILD_APP: ${{ needs['build-and-push-app'].result   || 'skipped' }}
+      RES_BUILD_WEB: ${{ needs['build-and-push-web'].result   || 'skipped' }}
+      RES_SNYK: ${{ needs['snyk-release'].result         || 'skipped' }}
+      RES_MIRROR: ${{ needs['mirror-to-nexus'].result      || 'skipped' }}
+      RES_PREP: ${{ needs['prepare-minikube'].result     || 'skipped' }}
+      RES_DEPLOY_MAC: ${{ needs['deploy-mac'].result           || 'skipped' }}
+      RES_DEPLOY_EC2: ${{ needs['deploy-ec2'].result           || 'skipped' }}
+      RES_ARGO_MINI: ${{ needs['k8s-argocd-minikube'].result  || 'skipped' }}
     steps:
-      - id: mk
+      - id: sum
+        name: Build Slack status/message
+        if: ${{ always() }}
         shell: bash
-        env:
-          TARGET: ${{ needs.resolve-target.outputs.target }}
-          RES_BUILD_APP: ${{ needs['build-and-push-app'].result }}
-          RES_BUILD_WEB: ${{ needs['build-and-push-web'].result }}
-          RES_SNYK: ${{ needs['snyk-release'].result }}
-          RES_MIRROR: ${{ needs['mirror-to-nexus'].result }}
-          RES_PREP: ${{ needs['prepare-minikube'].result }}
-          RES_DEPLOY_MAC: ${{ needs['deploy-mac'].result }}
-          RES_DEPLOY_EC2: ${{ needs['deploy-ec2'].result }}
-          RES_ARGO_MINI: ${{ needs['k8s-argocd-minikube'].result }}
         run: |
-          set -euo pipefail
+          set -u  # (no -e so this step can never bail early)
           failures=()
-          add_if_fail () { local name="$1" val="$2"; [[ "${val:-}" == "failure" ]] && failures+=("$name"); }
+          add_if_fail () { local n="$1" v="$2"; [[ "$v" == "failure" ]] && failures+=("$n"); }
 
           add_if_fail "build-and-push-app" "$RES_BUILD_APP"
           add_if_fail "build-and-push-web" "$RES_BUILD_WEB"
           add_if_fail "snyk-release"       "$RES_SNYK"
 
           if [[ "${TARGET:-mac}" == "mac" ]]; then
-            add_if_fail "mirror-to-nexus"        "$RES_MIRROR"
-            add_if_fail "prepare-minikube"       "$RES_PREP"
-            add_if_fail "deploy-mac"             "$RES_DEPLOY_MAC"
-            add_if_fail "k8s-argocd-minikube"    "$RES_ARGO_MINI"
-          elif [[ "${TARGET}" == "ec2" ]]; then
-            add_if_fail "deploy-ec2"             "$RES_DEPLOY_EC2"
+            add_if_fail "mirror-to-nexus"       "$RES_MIRROR"
+            add_if_fail "prepare-minikube"      "$RES_PREP"
+            add_if_fail "deploy-mac"            "$RES_DEPLOY_MAC"
+            add_if_fail "k8s-argocd-minikube"   "$RES_ARGO_MINI"
+          else
+            add_if_fail "deploy-ec2"            "$RES_DEPLOY_EC2"
           fi
 
           if ((${#failures[@]})); then
             echo "status=failure" >> "$GITHUB_OUTPUT"
-            echo "message=❌ Failed steps: ${failures[*]} · target=${TARGET}" >> "$GITHUB_OUTPUT"
+            printf "message=❌ Failed steps: %s · target=%s\n" "${failures[*]}" "${TARGET:-?}" >> "$GITHUB_OUTPUT"
           else
             echo "status=success" >> "$GITHUB_OUTPUT"
-            echo "message=✅ All steps succeeded · target=${TARGET}" >> "$GITHUB_OUTPUT"
+            printf "message=✅ All steps succeeded · target=%s\n" "${TARGET:-?}" >> "$GITHUB_OUTPUT"
           fi
+
+          # Make 100% sure this step never fails:
+          exit 0
+
+  notify-slack:
+    if: ${{ always() }}
+    needs:
+      - setup
+      - resolve-target
+      - summarize-status
+    uses: tAIness/devops-ci-lib/.github/workflows/slack-notify.yml@main
+    secrets: inherit
+    with:
+      title: "Release: ${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
+      status: "${{ needs.summarize-status.outputs.status || 'failure' }}"
+      message: "${{ needs.summarize-status.outputs.message }} · Actor: @${{ github.actor }} · Ref: ${{ github.ref_name }}"
+      only_on: "always"
+      run_url: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
