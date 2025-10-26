@@ -1,90 +1,25 @@
 # devops-project1/infra/helm/backend/templates/keda.yaml
-{{- /*
-KEDA resources (no _helpers.tpl). Put this in templates/keda.yaml
-Relies on .Values.autoscaling.mode == "keda"
-*/ -}}
-
-{{- /* Inline naming (no helpers) */ -}}
-{{- $name := default .Chart.Name .Values.nameOverride -}}
-{{- $fullname := (.Values.fullnameOverride | default (printf "%s-%s" .Release.Name $name)) | trunc 63 | trimSuffix "-" -}}
-
 {{- if eq (default "none" .Values.autoscaling.mode) "keda" -}}
+{{- $name := (.Values.fullnameOverride | default (printf "%s-%s" .Release.Name (.Chart.Name))) -}}
+{{- $ns := .Release.Namespace -}}
 
-{{- /*
------------------------------------------
-TriggerAuthentication (namespaced)
------------------------------------------
-*/ -}}
-{{- if .Values.autoscaling.keda.auths }}
-{{- range .Values.autoscaling.keda.auths }}
-apiVersion: keda.sh/v1alpha1
-kind: TriggerAuthentication
-metadata:
-  name: {{ printf "%s-%s" $fullname .name | trunc 63 | trimSuffix "-" }}
-  namespace: {{ $.Release.Namespace }}
-  labels:
-    app.kubernetes.io/name: {{ $name }}
-    app.kubernetes.io/instance: {{ $.Release.Name }}
-spec:
-{{ toYaml .spec | nindent 2 }}
----
-{{- end }}
-{{- end }}
+{{- $keda := .Values.autoscaling.keda | default dict -}}
+{{- $min := default 1 $keda.minReplicaCount -}}
+{{- $max := default 3 $keda.maxReplicaCount -}}
 
-{{- /*
------------------------------------------
-ClusterTriggerAuthentication (cluster-wide, optional)
------------------------------------------
-*/ -}}
-{{- if .Values.autoscaling.keda.clusterAuths }}
-{{- range .Values.autoscaling.keda.clusterAuths }}
-apiVersion: keda.sh/v1alpha1
-kind: ClusterTriggerAuthentication
-metadata:
-  name: {{ printf "%s-%s" $fullname .name | trunc 63 | trimSuffix "-" }}
-  labels:
-    app.kubernetes.io/name: {{ $name }}
-    app.kubernetes.io/instance: {{ $.Release.Name }}
-spec:
-{{ toYaml .spec | nindent 2 }}
----
-{{- end }}
-{{- end }}
-
-{{- /*
------------------------------------------
-ScaledObject(s)
------------------------------------------
-*/ -}}
-{{- if .Values.autoscaling.keda.scaledObjects }}
-{{- range .Values.autoscaling.keda.scaledObjects }}
+{{- range $idx, $so := (default list $keda.scaledObjects) }}
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
-  name: {{ printf "%s-%s" $fullname (.name | default "so") | trunc 63 | trimSuffix "-" }}
-  namespace: {{ $.Release.Namespace }}
-  labels:
-    app.kubernetes.io/name: {{ $name }}
-    app.kubernetes.io/instance: {{ $.Release.Name }}
+  name: {{ default (printf "%s-%d" $name $idx) $so.name | trunc 63 | trimSuffix "-" }}
+  namespace: {{ $ns }}
 spec:
   scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: {{ $fullname }}  # must match your Deployment metadata.name
-  pollingInterval: {{ .pollingInterval | default 30 }}         # seconds (optional)
-  cooldownPeriod:  {{ .cooldownPeriod  | default 300 }}        # seconds (optional)
-  minReplicaCount: {{ .minReplicaCount | default (dig "keda" "minReplicaCount" 1  $.Values.autoscaling) }}
-  maxReplicaCount: {{ .maxReplicaCount | default (dig "keda" "maxReplicaCount" 3 $.Values.autoscaling) }}
-  advanced:
-{{- if .advanced }}
-{{ toYaml .advanced | nindent 4 }}
-{{- else }}
-    restoreToOriginalReplicaCount: true
-{{- end }}
+    name: {{ $name }}
+  minReplicaCount: {{ default $min $so.minReplicaCount }}
+  maxReplicaCount: {{ default $max $so.maxReplicaCount }}
   triggers:
-{{ toYaml .triggers | nindent 4 }}
+{{ toYaml $so.triggers | indent 4 }}
 ---
 {{- end }}
-{{- end }}
-
-{{- end -}}  {{/* end: mode == keda */}}
+{{- end -}}

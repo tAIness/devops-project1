@@ -4,17 +4,12 @@ apiVersion: v1
 kind: Service
 metadata:
   name: app-svc
-  labels:
-    app.kubernetes.io/name: {{ .Chart.Name }}
-    app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
-  type: ClusterIP
   selector:
-    app.kubernetes.io/name: {{ .Chart.Name }}
+    app.kubernetes.io/name: {{ .Chart.Name | default "backend" }}
     app.kubernetes.io/instance: {{ .Release.Name }}
   ports:
     - name: http
-      port: {{ .Values.service.port }}   # 8000
+      port: {{ .Values.service.port }}
       targetPort: {{ .Values.service.port }}
-      protocol: TCP
 

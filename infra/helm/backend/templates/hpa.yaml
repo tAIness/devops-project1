@@ -1,30 +1,25 @@
 # devops-project1/infra/helm/backend/templates/hpa.yaml
-{{- /* inline fullname */ -}}
-{{- $name := default .Chart.Name .Values.nameOverride -}}
-{{- $fullname := (.Values.fullnameOverride | default (printf "%s-%s" .Release.Name $name)) | trunc 63 | trimSuffix "-" -}}
-
-{{- if and (eq (.Values.autoscaling.mode | default "none") "hpa") .Values.autoscaling.hpa }}
+{{- if eq (default "none" .Values.autoscaling.mode) "hpa" -}}
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: {{ $fullname }}
+  name: {{ .Values.fullnameOverride | default (printf "%s-%s" .Release.Name (.Chart.Name)) }}
   labels:
-    app.kubernetes.io/name: {{ $name }}
+    app.kubernetes.io/name: {{ default .Chart.Name .Values.nameOverride | default "backend" }}
     app.kubernetes.io/instance: {{ .Release.Name }}
-    helm.sh/chart: {{ .Chart.Name }}-{{ .Chart.Version | replace "+" "_" }}
-    app.kubernetes.io/managed-by: {{ .Release.Service }}
 spec:
   scaleTargetRef:
     apiVersion: apps/v1
     kind: Deployment
-    name: {{ $fullname }}
-  minReplicas: {{ .Values.autoscaling.hpa.minReplicas | default 1 }}
-  maxReplicas: {{ .Values.autoscaling.hpa.maxReplicas | default 3 }}
+    name: {{ .Values.fullnameOverride | default (printf "%s-%s" .Release.Name (.Chart.Name)) }}
+  minReplicas: {{ default 1 .Values.autoscaling.hpa.minReplicas }}
+  maxReplicas: {{ default 3 .Values.autoscaling.hpa.maxReplicas }}
   metrics:
     - type: Resource
       resource:
         name: cpu
         target:
           type: Utilization
-          averageUtilization: {{ .Values.autoscaling.hpa.targetCPUUtilizationPercentage | default 80 }}
-{{- end }}
+          averageUtilization: {{ default 80 .Values.autoscaling.hpa.targetCPUUtilizationPercentage }}
+{{- end -}}
+
