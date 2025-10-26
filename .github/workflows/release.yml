@@ -590,16 +590,43 @@ jobs:
   # ----------------------------------------------------------
   # Deploy to local minikube with Argo CD (App-of-Apps)
   # ----------------------------------------------------------
-  k8s-argocd-minikube:
+  kk8s-argocd-minikube:
     name: Minikube + Argo CD (App-of-Apps)
     runs-on: [ self-hosted, macOS ]
-    needs: [resolve-target, resolve-build-mode, prepare-minikube]
+    needs: [ resolve-target, resolve-build-mode, prepare-minikube ]
     if: ${{ needs.resolve-target.outputs.target == 'mac' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
     env:
       TAG: ${{ needs.resolve-build-mode.outputs.IMAGE_TAG }}
       ARGO_NS: argocd
     steps:
       - uses: actions/checkout@v4
+
+      # ---- Option A: Adopt pre-existing namespaces so Helm can own them ----
+      - name: Adopt app namespaces to Helm ownership (idempotent)
+        shell: bash
+        env:
+          RELEASE_NAME: argocd-apps
+          CHART_NS: ${{ env.ARGO_NS }}
+        run: |
+          set -euo pipefail
+          adopt() {
+            local ns="$1"
+            if kubectl get ns "$ns" >/dev/null 2>&1; then
+              echo "Adopting namespace '$ns' to Helm release ${RELEASE_NAME} in ${CHART_NS}…"
+              kubectl annotate namespace "$ns" \
+                meta.helm.sh/release-name="${RELEASE_NAME}" \
+                meta.helm.sh/release-namespace="${CHART_NS}" \
+                --overwrite
+              kubectl label namespace "$ns" app.kubernetes.io/managed-by=Helm --overwrite
+            else
+              echo "Namespace '$ns' does not exist (Helm will create it if needed)."
+            fi
+          }
+          adopt mario-backend
+          adopt mario-web
+          adopt monitoring
+
+      # ---- Install/Upgrade the App-of-Apps chart ----
       - name: Install/Upgrade App-of-Apps (Helm)
         shell: bash
         run: |
@@ -612,7 +639,6 @@ jobs:
             --set global.releaseTag="${TAG}" \
             --wait
           kubectl -n "${ARGO_NS}" get applications.argoproj.io -o wide || true
-
   # ----------------------------------------------------------
   # Slack summaries (global + minikube-only) and sender
   # ----------------------------------------------------------
