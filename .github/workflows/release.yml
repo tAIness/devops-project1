@@ -631,11 +631,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # IMPORTANT: Do NOT pre-create mario-backend/mario-web/monitoring here.
-          # The argocd-apps chart contains Namespace manifests and should own them.
+          # Do NOT pre-create namespaces here; the chart owns them.
           helm upgrade --install argocd-apps ./infra/helm/argocd-apps \
             -n "${ARGO_NS}" \
             -f ./infra/helm/argocd-apps/values.yaml \
+            --set project.enabled=false \  # <- rely on Argo CD’s built-in 'default' AppProject
             --set global.releaseTag="${TAG}" \
             --wait
           kubectl -n "${ARGO_NS}" get applications.argoproj.io -o wide || true
