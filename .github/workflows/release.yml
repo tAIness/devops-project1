@@ -750,18 +750,29 @@ jobs:
           kubectl get ns "${{ env.ARGO_NS }}" >/dev/null 2>&1 || kubectl create ns "${{ env.ARGO_NS }}"
           kubectl get ns "${{ env.APP_NS }}"  >/dev/null 2>&1 || kubectl create ns "${{ env.APP_NS }}"
 
-      - name: Install/Upgrade Argo CD via Helm
+      - name: Install/Upgrade Argo CD via Helm (match existing release name)
         shell: bash
+        env:
+          ARGO_NS: argocd
         run: |
           set -euo pipefail
-          helm repo add argo https://argoproj.github.io/argo-helm
+          kubectl get ns "${ARGO_NS}" >/dev/null 2>&1 || kubectl create ns "${ARGO_NS}"
+
+          helm repo add argo https://argoproj.github.io/argo-helm || true
           helm repo update
-          # Expose Argo CD server via NodePort and allow HTTP (handy for local)
-          helm upgrade --install argo-cd argo/argo-cd -n "${ARGO_NS}" \
+
+          # Use release name "argocd" to match existing resource annotations
+          RELEASE=argocd
+
+          helm upgrade --install "${RELEASE}" argo/argo-cd \
+            -n "${ARGO_NS}" \
+            --create-namespace \
             --set server.service.type=NodePort \
             --set configs.params."server.insecure"=true \
-            --wait
+            --wait --atomic
+
           kubectl -n "${ARGO_NS}" get pods
+        
 
       - name: Deploy App-of-Apps (points to infra/helm/argocd-apps)
         shell: bash
