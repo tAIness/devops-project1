@@ -535,21 +535,21 @@ jobs:
           MK_DRIVER: ${{ vars.MINIKUBE_DRIVER  || 'docker' }}
           MK_CPUS: ${{ vars.MINIKUBE_CPUS    || '4' }}
           MK_MEMORY: ${{ vars.MINIKUBE_MEMORY  || '6g' }}
-          # Leave unset to reuse the running version. Only set if you really want to create at that version.
+          # Leave unset in repo vars to reuse the existing cluster version.
           MK_K8S_VER: ${{ vars.MINIKUBE_K8S_VERSION }}
         run: |
           set -euo pipefail
           echo "Profile=${MK_PROFILE}; driver=${MK_DRIVER}; cpus=${MK_CPUS}; mem=${MK_MEMORY}; requested_k8s=${MK_K8S_VER:-<none>}"
-          
+
           is_running() {
             minikube status -p "${MK_PROFILE}" --output=json 2>/dev/null | grep -q '"Host": "Running"'
           }
-          
+
           current_version() {
             minikube -p "${MK_PROFILE}" kubectl -- \
               get nodes -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}' 2>/dev/null || true
           }
-          
+
           if is_running; then
             CUR_VER="$(current_version)"
             echo "Minikube already running. Current k8s: ${CUR_VER:-unknown}"
@@ -564,14 +564,12 @@ jobs:
             minikube start "${ARGS[@]}"
             RC=$?
             set -e
-            # If the start failed due to a version mismatch, retry without pinning a version
             if [[ $RC -ne 0 ]]; then
               echo "::warning::minikube start failed (rc=$RC). Retrying without --kubernetes-version to reuse default/current…"
               minikube start -p "${MK_PROFILE}" --driver="${MK_DRIVER}" --cpus="${MK_CPUS}" --memory="${MK_MEMORY}"
             fi
           fi
-          
-          # Use this profile’s context and show nodes
+
           kubectl config use-context "${MK_PROFILE}" >/dev/null 2>&1 || true
           kubectl get nodes -o wide || true
 
