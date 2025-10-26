@@ -656,7 +656,6 @@ jobs:
       - prepare-minikube
       - deploy-mac
       - deploy-ec2
-      - k8s-argocd-minikube
     outputs:
       status: ${{ steps.sum.outputs.status }}
       message: ${{ steps.sum.outputs.message }}
@@ -665,12 +664,11 @@ jobs:
       BUILD_IMAGES: ${{ needs.resolve-build-mode.outputs.BUILD_IMAGES || 'true' }}
       RES_BUILD_APP: ${{ needs['build-and-push-app'].result   || 'skipped' }}
       RES_BUILD_WEB: ${{ needs['build-and-push-web'].result   || 'skipped' }}
-      RES_SNYK:      ${{ needs['snyk-release'].result         || 'skipped' }}
-      RES_MIRROR:    ${{ needs['mirror-to-nexus'].result      || 'skipped' }}
-      RES_PREP:      ${{ needs['prepare-minikube'].result     || 'skipped' }}
-      RES_DEPLOY_MAC: ${{ needs['deploy-mac'].result || 'skipped' }}
-      RES_DEPLOY_EC2: ${{ needs['deploy-ec2'].result || 'skipped' }}
-      RES_ARGO_MINI: ${{ needs['k8s-argocd-minikube'].result  || 'skipped' }}
+      RES_SNYK: ${{ needs['snyk-release'].result         || 'skipped' }}
+      RES_MIRROR: ${{ needs['mirror-to-nexus'].result      || 'skipped' }}
+      RES_PREP: ${{ needs['prepare-minikube'].result     || 'skipped' }}
+      RES_DEPLOY_MAC: ${{ needs['deploy-mac'].result          || 'skipped' }}
+      RES_DEPLOY_EC2: ${{ needs['deploy-ec2'].result          || 'skipped' }}
     steps:
       - id: sum
         name: Build Slack status/message
@@ -688,12 +686,11 @@ jobs:
           add_if_fail "build-and-push-web" "$RES_BUILD_WEB"
           add_if_fail "snyk-release"       "$RES_SNYK"
           if [[ "${TARGET:-mac}" == "mac" ]]; then
-            add_if_fail "mirror-to-nexus"     "$RES_MIRROR"
-            add_if_fail "prepare-minikube"    "$RES_PREP"
-            add_if_fail "deploy-mac"          "$RES_DEPLOY_MAC"
-            add_if_fail "k8s-argocd-minikube" "$RES_ARGO_MINI"
+            add_if_fail "mirror-to-nexus"   "$RES_MIRROR"
+            add_if_fail "prepare-minikube"  "$RES_PREP"
+            add_if_fail "deploy-mac"        "$RES_DEPLOY_MAC"
           else
-            add_if_fail "deploy-ec2"          "$RES_DEPLOY_EC2"
+            add_if_fail "deploy-ec2"        "$RES_DEPLOY_EC2"
           fi
           if ((${#failures[@]})); then
             echo "status=failure" >> "$GITHUB_OUTPUT"
@@ -708,24 +705,11 @@ jobs:
     name: notify-slack / send
     if: ${{ always() }}
     needs:
-      - resolve-target
-      - resolve-build-mode
-      - compute-tag
-      - bump-helm-appversion
-      - create-tag
-      - build-and-push-app
-      - build-and-push-web
-      - snyk-release
-      - mirror-to-nexus
-      - deploy-ec2
-      - deploy-mac
-      - prepare-minikube
-      - k8s-argocd-minikube
-      - summarize-status
+      - summarize-status     # <— only the aggregator
     uses: tAIness/devops-ci-lib/.github/workflows/slack-notify.yml@main
     secrets: inherit
     with:
-      title: "Release: ${{ needs.resolve-build-mode.outputs.IMAGE_TAG || github.ref_name }}"
+      title: "Release: ${{ needs.summarize-status.outputs.status == 'success' && (github.ref_type == 'tag' && github.ref_name || needs.resolve-build-mode.outputs.IMAGE_TAG) || (needs.resolve-build-mode.outputs.IMAGE_TAG || github.ref_name) }}"
       status: ${{ needs.summarize-status.outputs.status }}
       only_on: "always"
       run_url: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
