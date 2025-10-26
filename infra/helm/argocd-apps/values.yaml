@@ -3,13 +3,10 @@ global:
   argoNamespace: argocd
   repoURL: https://github.com/tAIness/devops-project1.git
   targetRevision: main
-
-  releaseTag: ""
-
+  releaseTag: "v1.0.174"
 project:
   enabled: true
   name: default
-
 apps:
   - name: backend
     path: infra/helm/backend
@@ -20,7 +17,7 @@ apps:
       values:
         image:
           repository: docker.io/itaef/supermario-service
-          tag: ""         # Chart.appVersion
+          tag: "" # Chart.appVersion
     values:
       ingress:
         enabled: true
@@ -40,24 +37,21 @@ apps:
         storage:
           size: 1Gi
         storageClassName: standard
-        service: { name: db, port: 5432 }
-
+        service: {name: db, port: 5432}
   - name: web
     path: infra/helm/web
     destinationNamespace: mario-web
     annotations:
-      argocd.argoproj.io/sync-wave: "10"   # deploy after backend
+      argocd.argoproj.io/sync-wave: "10" # deploy after backend
     helm:
       values:
         image:
           repository: docker.io/itaef/supermario-front
-          tag: ""         # Chart.appVersion
+          tag: "" # Chart.appVersion
     values:
       ingress:
         enabled: true
         host: web.mario.local
-
-
 helmApps:
   # Install KEDA first so ScaledObject CRDs exist
   - name: keda
@@ -69,8 +63,7 @@ helmApps:
       chart: keda
       targetRevision: 2.14.0
     helm:
-      values: ""   # optional overrides
-
+      values: "" # optional overrides
   - name: monitoring
     destinationNamespace: monitoring
     annotations:
@@ -125,12 +118,9 @@ helmApps:
                   resources:
                     requests:
                       storage: 1Gi
-
 secrets:
   - namespace: monitoring
     name: grafana-admin
     stringData:
       admin-user: admin
       admin-password: admin
-
-
