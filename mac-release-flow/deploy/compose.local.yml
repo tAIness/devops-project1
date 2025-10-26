@@ -20,7 +20,7 @@ services:
 
   app:
     image: ${DOCKERHUB_REPO_APP}:${TAG}
-    # pull_policy: never   # <-- remove this so compose can pull from Hub/Nexus
+    pull_policy: never
     container_name: supermario_app
     depends_on:
       db:
@@ -39,7 +39,7 @@ services:
 
   web:
     image: ${DOCKERHUB_REPO_WEB}:${TAG}
-    # pull_policy: never
+    pull_policy: never
     container_name: supermario_web
     depends_on:
       app:

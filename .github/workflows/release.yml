@@ -447,8 +447,14 @@ jobs:
           if: ${{ env.REGISTRY_KIND == 'nexus' && env.NEXUS_DOMAIN != '' && env.NEXUS_USER != '' && env.NEXUS_PASS != '' }}
           run: echo "${NEXUS_PASS}" | docker login "${NEXUS_DOMAIN}" -u "${NEXUS_USER}" --password-stdin
 
-        - name: Ensure volume & try pre-pulling images (helps first boot)
+        - name: Ensure volume & resilient pre-pulls (Hub→Nexus fallback)
           shell: bash
+          env:
+            FALLBACK_NEXUS_DOMAIN: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}
+            FALLBACK_NEXUS_USER: ${{ secrets.NEXUS_USERNAME }}
+            FALLBACK_NEXUS_PASS: ${{ secrets.NEXUS_PASSWORD }}
+            FALLBACK_NEXUS_APP: ${{ secrets.NEXUS_REPO_APP }}
+            FALLBACK_NEXUS_WEB: ${{ secrets.NEXUS_REPO_WEB }}
           run: |
             set -euo pipefail
             docker volume create supermario_db_data >/dev/null
@@ -456,9 +462,36 @@ jobs:
             APP_REPO="$(grep '^DOCKERHUB_REPO_APP=' mac-release-flow/.env.local | cut -d= -f2)"
             WEB_REPO="$(grep '^DOCKERHUB_REPO_WEB=' mac-release-flow/.env.local | cut -d= -f2)"
 
-            echo "Pre-pulling ${APP_REPO}:${TAG} and ${WEB_REPO}:${TAG} (best effort)…"
-            docker pull "${APP_REPO}:${TAG}" || true
-            docker pull "${WEB_REPO}:${TAG}" || true
+            pull_or_note() {
+              local img="$1"
+              if docker pull "$img"; then
+                echo "::notice::Pulled $img"
+                return 0
+              fi
+              err="$(
+                docker pull "$img" 2>&1 >/dev/null || true
+              )"
+              if echo "$err" | grep -q 'pull rate limit'; then
+                echo "::warning::Rate limited pulling $img from Hub."
+                return 2
+              fi
+              echo "::warning::Could not pull $img; continuing (compose may still work if image is local)."
+              return 1
+            }
+
+            need_fallback=false
+            pull_or_note "${APP_REPO}:${TAG}" || [[ $? -eq 2 ]] && need_fallback=true
+            pull_or_note "${WEB_REPO}:${TAG}" || [[ $? -eq 2 ]] && need_fallback=true
+
+            if $need_fallback && [[ "${REGISTRY_KIND:-hub}" != "nexus" ]] \
+               && [[ -n "${FALLBACK_NEXUS_DOMAIN:-}" && -n "${FALLBACK_NEXUS_APP:-}" && -n "${FALLBACK_NEXUS_WEB:-}" ]]; then
+              echo "::notice::Falling back to Nexus for pulls…"
+              echo "${FALLBACK_NEXUS_PASS}" | docker login "${FALLBACK_NEXUS_DOMAIN}" -u "${FALLBACK_NEXUS_USER}" --password-stdin
+
+              docker pull "${FALLBACK_NEXUS_DOMAIN}/${FALLBACK_NEXUS_APP}:${TAG}" || true
+              docker pull "${FALLBACK_NEXUS_DOMAIN}/${FALLBACK_NEXUS_WEB}:${TAG}" || true
+            fi
+        
 
         - name: Compose up on Mac (load env file explicitly)
           run: |
