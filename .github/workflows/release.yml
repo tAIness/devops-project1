@@ -475,9 +475,131 @@ jobs:
             curl -sI http://127.0.0.1:${WEB_PORT:-8082} | grep -q "200 OK"
             echo "Smoke tests passed: API healthy and web serving 200."  
 
-    # ----------------------------------------------------------
-    # Slack - Notify
-    # ----------------------------------------------------------
+# ----------------------------------------------------------
+# Deploy to local minikube with Argo CD (App-of-Apps)
+# ----------------------------------------------------------
+  k8s-argocd-minikube:
+    name: Minikube + Argo CD (App-of-Apps)
+    runs-on: [ self-hosted, macOS ]
+    needs: [ setup, build-and-push-app, build-and-push-web, snyk-release ]
+    if: ${{ needs.resolve-target.outputs.target == 'mac' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
+    env:
+      TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
+
+      # Namespaces
+      ARGO_NS: argocd
+      APP_NS: supermario
+
+      # If you ever want to override repos, set these as org/repo vars or secrets
+      DOCKERHUB_REPO_APP: ${{ secrets.DOCKERHUB_REPO_APP }}   # e.g. itaef/supermario-service
+      DOCKERHUB_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}   # e.g. itaef/supermario-front
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install kubectl, helm, minikube (idempotent)
+        # brew is present on the Mac runner; this is safe to re-run
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew list --versions kubectl  >/dev/null 2>&1 || brew install kubectl
+          brew list --versions helm     >/dev/null 2>&1 || brew install helm
+          brew list --versions minikube >/dev/null 2>&1 || brew install minikube
+          kubectl version --client=true
+          helm version
+          minikube version
+
+      - name: Start minikube (docker driver)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Feel free to adjust k8s version/resources
+          minikube start \
+            --driver=docker \
+            --kubernetes-version=v1.30.0 \
+            --cpus=4 --memory=6g
+          kubectl get nodes -o wide
+
+      - name: Pre-create namespaces
+        shell: bash
+        run: |
+          set -euo pipefail
+          kubectl get ns "${{ env.ARGO_NS }}" >/dev/null 2>&1 || kubectl create ns "${{ env.ARGO_NS }}"
+          kubectl get ns "${{ env.APP_NS }}"  >/dev/null 2>&1 || kubectl create ns "${{ env.APP_NS }}"
+
+      - name: Install/Upgrade Argo CD via Helm
+        shell: bash
+        run: |
+          set -euo pipefail
+          helm repo add argo https://argoproj.github.io/argo-helm
+          helm repo update
+          # Expose Argo CD server via NodePort and allow HTTP (handy for local)
+          helm upgrade --install argo-cd argo/argo-cd -n "${ARGO_NS}" \
+            --set server.service.type=NodePort \
+            --set configs.params."server.insecure"=true \
+            --wait
+          kubectl -n "${ARGO_NS}" get pods
+
+      - name: Deploy App-of-Apps (points to infra/helm/argocd-apps)
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Your CI already bumps Chart.appVersion and writes argocd-apps/values.yaml.global.releaseTag
+          # We additionally pass TAG explicitly to be crystal clear:
+          helm upgrade --install argocd-apps ./infra/helm/argocd-apps \
+            -n "${ARGO_NS}" \
+            -f ./infra/helm/argocd-apps/values.yaml \
+            --set global.releaseTag="${TAG}" \
+            --wait
+          # Show created Argo CD Applications
+          kubectl -n "${ARGO_NS}" get applications.argoproj.io -o wide || true
+
+      - name: Wait for app workloads to become Ready
+        shell: bash
+        run: |
+          set -euo pipefail
+          # If your Application sets syncPolicy: automated, Argo will create Deployments/Services.
+          # Wait for the backend + web Deployments (names must match your chart Release/metadata)
+          # Adjust names if your charts use different .Release.Name:
+          kubectl -n "${APP_NS}" rollout status deploy/backend --timeout=300s
+          kubectl -n "${APP_NS}" rollout status deploy/web     --timeout=300s
+          kubectl -n "${APP_NS}" get svc -o wide
+          kubectl -n "${APP_NS}" get deploy,pod -o wide
+
+      - name: Print access URLs (NodePort / minikube service)
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "web service URLs:"
+          minikube service -n "${APP_NS}" web --url || true
+          echo "backend service URLs:"
+          minikube service -n "${APP_NS}" backend --url || true
+          echo "Argo CD server URL (NodePort):"
+          kubectl -n "${ARGO_NS}" get svc argo-cd-argocd-server -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}'; echo
+          echo "Open: http://$(minikube ip):$(kubectl -n ${ARGO_NS} get svc argo-cd-argocd-server -o jsonpath='{.spec.ports[?(@.name=="http")].nodePort}')"
+
+      - name: Snapshot cluster state (artifact)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k8s-state
+          path: |
+            **/infra/helm/argocd-apps/values.yaml
+        # also dump kubernetes objects into a file for debugging
+      - name: Dump k8s objects
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          kubectl get all -A -o wide > k8s-all.txt || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: k8s-all
+          path: k8s-all.txt
+
+# ----------------------------------------------------------
+# Slack - Notify
+# ----------------------------------------------------------
 
   notify-slack:
     if: ${{ always() }}
@@ -494,12 +616,22 @@ jobs:
       - mirror-to-nexus
       - deploy-ec2
       - deploy-mac
+      - k8s-argocd-minikube
 
     uses: tAIness/devops-ci-lib/.github/workflows/slack-notify.yml@main
     secrets: inherit
     with:
       title: "Release: ${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
-      status: ${{ (needs['build-and-push-app'].result == 'failure' || needs['build-and-push-web'].result == 'failure' || needs['snyk-release'].result == 'failure' || (needs.resolve-target.outputs.target == 'mac' && (needs['mirror-to-nexus'].result == 'failure' || needs['deploy-mac'].result == 'failure')) || (needs.resolve-target.outputs.target == 'ec2' && needs['deploy-ec2'].result == 'failure')) && 'failure' || 'success' }}
+      status: >-
+        ${{ (needs['build-and-push-app'].result == 'failure'
+          || needs['build-and-push-web'].result == 'failure'
+          || needs['snyk-release'].result == 'failure'
+          || (needs.resolve-target.outputs.target == 'mac' && (
+               needs['mirror-to-nexus'].result == 'failure'
+            || needs['deploy-mac'].result == 'failure'
+            || needs['k8s-argocd-minikube'].result == 'failure'))
+          || (needs.resolve-target.outputs.target == 'ec2' && needs['deploy-ec2'].result == 'failure'))
+          && 'failure' || 'success' }}
       only_on: "always"
       run_url: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       message: "Actor: @${{ github.actor }} · Ref: ${{ github.ref_name }}"
