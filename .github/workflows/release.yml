@@ -528,35 +528,27 @@ jobs:
           helm version || true
           minikube version || true
 
-      - name: Start/ensure Minikube
-        id: mkstart
+      - name: Start/ensure Minikube (no recreate; warn only)
         shell: bash
         env:
-          MK_DRIVER: docker
-          MK_CPUS: "4"
-          MK_MEMORY: "6g"
-          # Optional: request a specific k8s version (leave blank to reuse existing)
-          MK_K8S_VER: ${{ vars.MINIKUBE_K8S_VERSION }}   # e.g. v1.34.0
-          # Optional: allow delete+recreate if version differs
-          MK_ALLOW_RECREATE: ${{ vars.MINIKUBE_ALLOW_RECREATE || 'false' }}
-          # Optional: use a dedicated profile
           MK_PROFILE: ${{ vars.MINIKUBE_PROFILE || 'minikube' }}
+          MK_DRIVER: ${{ vars.MINIKUBE_DRIVER  || 'docker'   }}
+          MK_CPUS: ${{ vars.MINIKUBE_CPUS    || '4'        }}
+          MK_MEMORY: ${{ vars.MINIKUBE_MEMORY  || '6g'       }}
+          # Optional: if you set this, we’ll just WARN when it differs from the running cluster.
+          MK_K8S_VER: ${{ vars.MINIKUBE_K8S_VERSION }}   # e.g. v1.34.0 or leave unset
         run: |
           set -euo pipefail
-
-          echo "Target profile: ${MK_PROFILE}; requested k8s: ${MK_K8S_VER:-<none>}; allow recreate: ${MK_ALLOW_RECREATE}"
 
           is_running() {
             minikube status -p "${MK_PROFILE}" --output=json 2>/dev/null | grep -q '"Host": "Running"'
           }
-
           current_version() {
             minikube -p "${MK_PROFILE}" kubectl -- \
               get nodes -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}' 2>/dev/null || true
           }
-
           start_minikube() {
-            echo "Starting minikube (profile=${MK_PROFILE})…"
+            echo "Starting minikube (profile=${MK_PROFILE})..."
             minikube start -p "${MK_PROFILE}" \
               --driver="${MK_DRIVER}" \
               --cpus="${MK_CPUS}" \
@@ -565,43 +557,53 @@ jobs:
           }
 
           if is_running; then
-            echo "Minikube is already running for profile ${MK_PROFILE}."
-            if [[ -n "${MK_K8S_VER:-}" ]]; then
-              CUR_VER="$(current_version)"
-              echo "Current cluster version: ${CUR_VER:-unknown}; requested: ${MK_K8S_VER}"
-              if [[ -n "${CUR_VER}" && "${CUR_VER#v}" != "${MK_K8S_VER#v}" ]]; then
-                if [[ "${MK_ALLOW_RECREATE}" == "true" ]]; then
-                  echo "::warning::Recreating cluster to satisfy requested version ${MK_K8S_VER} (was ${CUR_VER})"
-                  minikube delete -p "${MK_PROFILE}" || true
-                  start_minikube
-                else
-                  echo "::warning::Existing cluster (${CUR_VER}) != requested (${MK_K8S_VER}); reusing existing to avoid downgrade."
-                fi
-              fi
+            echo "Minikube profile '${MK_PROFILE}' is already running."
+            CUR="$(current_version)"
+            echo "Current cluster version: ${CUR:-unknown}"
+            if [[ -n "${MK_K8S_VER:-}" && -n "${CUR}" && "${CUR#v}" != "${MK_K8S_VER#v}" ]]; then
+              echo "::warning::Requested Kubernetes ${MK_K8S_VER} but existing cluster is ${CUR}. Reusing existing cluster (no recreate)."
             fi
           else
+            # Only start when not running; if MK_K8S_VER is set, we’ll use it, otherwise default
             start_minikube
           fi
 
-          # Set kubectl context and show nodes
+          # Point kubectl at the profile and show nodes
           kubectl config use-context "${MK_PROFILE}" >/dev/null
           kubectl get nodes -o wide || true
 
-          # Outputs for downstream jobs/steps
-          RUNNING="false"
-          if is_running; then RUNNING="true"; fi
-          VER="$(current_version)"
-          echo "running=${RUNNING}"       >> "$GITHUB_OUTPUT"
-          echo "k8s_version=${VER:-n/a}"  >> "$GITHUB_OUTPUT"
-          echo "profile=${MK_PROFILE}"    >> "$GITHUB_OUTPUT"
-
-      - name: Enable addons (ingress, metrics)
-        if: ${{ steps.mkstart.outputs.running == 'true' }}
+      - name: Enable addons (ingress, metrics) — idempotent
+        shell: bash
+        env:
+          MK_PROFILE: ${{ vars.MINIKUBE_PROFILE || 'minikube' }}
         run: |
-          minikube -p "${{ steps.mkstart.outputs.profile }}" addons enable ingress
-          minikube -p "${{ steps.mkstart.outputs.profile }}" addons enable metrics-server
-          kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s
+          set -euo pipefail
 
+          # Skip gracefully if Minikube isn't up
+          if ! minikube status -p "${MK_PROFILE}" --output=json 2>/dev/null | grep -q '"Host": "Running"'; then
+            echo "::warning::Minikube profile '${MK_PROFILE}' is not running; skipping addon enable."
+            exit 0
+          fi
+
+          enable_if_needed () {
+            local addon="$1"
+            # Check current state
+            if minikube addons list -p "${MK_PROFILE}" | awk -v a="$addon" '$1==a{print tolower($2)}' | grep -qE 'enabled|true'; then
+              echo "Addon '${addon}' already enabled."
+            else
+              minikube addons enable -p "${MK_PROFILE}" "${addon}"
+            fi
+          }
+
+          enable_if_needed ingress
+          enable_if_needed metrics-server
+
+          # Wait for ingress controller only if the namespace exists
+          if kubectl get ns ingress-nginx >/dev/null 2>&1; then
+            kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s \
+              || echo "::warning::ingress-nginx-controller not Ready yet."
+          fi
+            
       - name: (Optional) Create imagePullSecrets for private registries
         run: |
           set -euo pipefail
