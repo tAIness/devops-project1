@@ -3,7 +3,7 @@ global:
   argoNamespace: argocd
   repoURL: https://github.com/tAIness/devops-project1.git
   targetRevision: main
-  releaseTag: "v1.0.172" # CI sets vX.Y.Z here
+  releaseTag: "v1.0.173" # CI sets vX.Y.Z here
 project:
   enabled: true
   name: default
@@ -66,7 +66,6 @@ secrets:
     stringData:
       admin-user: admin
       admin-password: admin
-
   - name: keda
     destinationNamespace: keda
     source:
@@ -74,4 +73,4 @@ secrets:
       chart: keda
       targetRevision: 2.14.0
     helm:
-      values: ""   # optional overrides
+      values: "" # optional overrides
