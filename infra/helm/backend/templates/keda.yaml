@@ -1,17 +1,25 @@
 # devops-project1/infra/helm/backend/templates/keda.yaml
-{{- if eq (default "none" .Values.autoscaling.mode) "keda" -}}
+{{- if eq (default "none" .Values.autoscaling.mode) "keda" }}
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
-  name: {{ include "backend.fullname" . | default "app" }}-http-queue
+  name: {{ include "backend.fullname" . }}-http-queue
+  namespace: {{ .Release.Namespace }}
 spec:
   scaleTargetRef:
-    name: {{ include "backend.fullname" . | default "app" }}
+    kind: Deployment
+    name: {{ include "backend.fullname" . }}
   minReplicaCount: {{ .Values.autoscaling.keda.minReplicaCount | default 1 }}
   maxReplicaCount: {{ .Values.autoscaling.keda.maxReplicaCount | default 3 }}
-  {{- with .Values.autoscaling.keda.triggers }}
   triggers:
-{{ toYaml . | nindent 4 }}
-  {{- end }}
+{{- range (default (list) .Values.autoscaling.keda.scaledObjects) }}
+  - type: {{ (index . "triggers" 0).type | default "prometheus" }}
+    metadata:
+      serverAddress: http://prometheus-operated.monitoring.svc:9090
+      metricName: http_requests_pending
+      threshold: "100"
+      query: sum(rate(http_requests_pending[1m]))
 {{- end }}
+{{- end }}
+
 

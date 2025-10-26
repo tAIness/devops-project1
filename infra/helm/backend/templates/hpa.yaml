@@ -1,21 +1,22 @@
 # devops-project1/infra/helm/backend/templates/hpa.yaml
-{{- if eq (default "none" .Values.autoscaling.mode) "hpa" -}}
+{{- if eq (default "none" .Values.autoscaling.mode) "hpa" }}
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:
-  name: {{ include "backend.fullname" . | default "app" }}
+  name: {{ include "backend.fullname" . }}
+  namespace: {{ .Release.Namespace }}
 spec:
-  scaleTargetRef:
-    apiVersion: apps/v1
-    kind: Deployment
-    name: {{ include "backend.fullname" . | default "app" }}
-  minReplicas: {{ .Values.autoscaling.hpa.minReplicas | default 1 }}
-  maxReplicas: {{ .Values.autoscaling.hpa.maxReplicas | default 3 }}
+  minReplicas: {{ .Values.autoscaling.hpa.minReplicas }}
+  maxReplicas: {{ .Values.autoscaling.hpa.maxReplicas }}
   metrics:
     - type: Resource
       resource:
         name: cpu
         target:
           type: Utilization
-          averageUtilization: {{ .Values.autoscaling.hpa.targetCPUUtilizationPercentage | default 80 }}
+          averageUtilization: {{ .Values.autoscaling.hpa.targetCPUUtilizationPercentage }}
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: {{ .Values.fullnameOverride | default (printf "%s-%s" .Release.Name .Chart.Name) }}
 {{- end }}
