@@ -528,27 +528,60 @@ jobs:
           helm version || true
           minikube version || true
 
-      - name: Start/ensure Minikube is running
+      - name: Start/ensure Minikube
         shell: bash
+        env:
+          MK_DRIVER: docker
+          MK_CPUS: "4"
+          MK_MEMORY: "6g"
+          # Optional: request a specific k8s version (leave blank to reuse existing)
+          MK_K8S_VER: ${{ vars.MINIKUBE_K8S_VERSION }}   # e.g. v1.34.0  (or leave unset)
+          # Optional: allow delete+recreate if version differs
+          MK_ALLOW_RECREATE: ${{ vars.MINIKUBE_ALLOW_RECREATE || 'false' }}
+          # Optional: use a dedicated profile
+          MK_PROFILE: ${{ vars.MINIKUBE_PROFILE || 'minikube' }}
         run: |
           set -euo pipefail
 
-          # Build args list safely
-          args=( --driver="${MK_DRIVER}" --cpus="${MK_CPUS}" --memory="${MK_MEMORY}" )
-          if [[ "${REGISTRY_KIND:-hub}" == "nexus" && -n "${NEXUS_DOMAIN:-}" ]]; then
-            args+=( --insecure-registry="${NEXUS_DOMAIN}" )
-          fi
+          echo "Target profile: ${MK_PROFILE}; requested k8s: ${MK_K8S_VER:-<none>}; allow recreate: ${MK_ALLOW_RECREATE}"
 
-          if ! minikube status --output=json 2>/dev/null | grep -q '"Host": "Running"'; then
-            echo "Starting minikube…"
-            minikube start "${args[@]}"
+          is_running() {
+            minikube status -p "${MK_PROFILE}" --output=json 2>/dev/null | grep -q '"Host": "Running"'
+          }
+
+          start_minikube() {
+            echo "Starting minikube (profile=${MK_PROFILE})…"
+            minikube start -p "${MK_PROFILE}" \
+              --driver="${MK_DRIVER}" \
+              --cpus="${MK_CPUS}" \
+              --memory="${MK_MEMORY}" \
+              ${MK_K8S_VER:+--kubernetes-version="${MK_K8S_VER}"}
+          }
+
+          if is_running; then
+            echo "Minikube is already running for profile ${MK_PROFILE}."
+            # If a version was requested, compare and decide what to do
+            if [[ -n "${MK_K8S_VER:-}" ]]; then
+              CUR_VER="$(minikube -p "${MK_PROFILE}" kubectl -- \
+                get nodes -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}' 2>/dev/null || echo '')"
+              echo "Current cluster version: ${CUR_VER:-unknown}; requested: ${MK_K8S_VER}"
+              if [[ -n "${CUR_VER}" && "${CUR_VER#v}" != "${MK_K8S_VER#v}" ]]; then
+                if [[ "${MK_ALLOW_RECREATE}" == "true" ]]; then
+                  echo "::warning::Recreating cluster to satisfy requested version ${MK_K8S_VER} (was ${CUR_VER})"
+                  minikube delete -p "${MK_PROFILE}" || true
+                  start_minikube
+                else
+                  echo "::warning::Existing cluster (${CUR_VER}) != requested (${MK_K8S_VER}); reusing existing to avoid downgrade."
+                fi
+              fi
+            fi
           else
-            echo "Minikube already running."
-            # (Flags like --insecure-registry take effect on next start)
+            start_minikube
           fi
 
-          # Set context for kubectl
-          kubectl config use-context minikube
+          # Set kubectl context and show nodes
+          kubectl config use-context "${MK_PROFILE}" >/dev/null
+          kubectl get nodes -o wide
 
       - name: Enable addons (ingress, metrics)
         run: |
