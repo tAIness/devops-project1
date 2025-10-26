@@ -473,12 +473,171 @@ jobs:
             set -euo pipefail
             curl -sf http://127.0.0.1:8000/health | jq -e '.status=="ok"' >/dev/null
             curl -sI http://127.0.0.1:${WEB_PORT:-8082} | grep -q "200 OK"
-            echo "Smoke tests passed: API healthy and web serving 200."  
+            echo "Smoke tests passed: API healthy and web serving 200."
+
+# ----------------------------------------------------------
+# Prepare local Minikube + Ingress + Argo CD (idempotent)
+# ----------------------------------------------------------
+
+  prepare-minikube:
+
+    name: Prepare Minikube & Argo CD
+    runs-on: [ self-hosted, macOS ]
+    # run only on mac target, and on main or tags
+    if: ${{ needs.resolve-target.outputs.target == 'mac' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
+    needs: [ resolve-target ]   # so we can read target/mac decision
+    env:
+      # cluster sizing (tweak as you like)
+      MK_CPUS: "4"
+      MK_MEMORY: "6g"
+      MK_DRIVER: docker
+
+      # If you mirror to local Nexus and want k8s to pull from it:
+      REGISTRY_KIND: ${{ vars.DEPLOY_REGISTRY }}             # "nexus" or empty/"hub"
+      NEXUS_DOMAIN: ${{ secrets.NEXUS_REGISTRY_DOMAIN }}     # e.g. 127.0.0.1:5000
+      NEXUS_USER: ${{ secrets.NEXUS_USERNAME }}
+      NEXUS_PASS: ${{ secrets.NEXUS_PASSWORD }}
+
+      # Optional Docker Hub creds (if your Hub repos are private)
+      DH_USER: ${{ secrets.DOCKERHUB_USERNAME }}
+      DH_TOKEN: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      # Namespaces used by your App-of-Apps chart
+      ARGO_NS: argocd
+      NS_BACKEND: mario-backend
+      NS_WEB: mario-web
+      NS_MON: monitoring
+
+      # Argo CD version (pin a stable)
+      ARGO_VERSION: "v2.11.7"
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure kubectl, helm, minikube
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Homebrew is already on the self-hosted Mac; avoid reinstalling
+          brew update || true
+          brew list --versions kubernetes-cli >/dev/null 2>&1 || brew install kubernetes-cli
+          brew list --versions helm           >/dev/null 2>&1 || brew install helm
+          brew list --versions minikube       >/dev/null 2>&1 || brew install minikube
+          
+          kubectl version --client --output=yaml || true
+          helm version || true
+          minikube version || true
+
+      - name: Start/ensure Minikube is running
+        run: |
+          set -euo pipefail
+          # Add insecure-registry flag if using local Nexus
+          EXTRA=()
+          if [[ "${REGISTRY_KIND:-hub}" == "nexus" && -n "${NEXUS_DOMAIN:-}" ]]; then
+            EXTRA+=(--insecure-registry="${NEXUS_DOMAIN}")
+          fi
+
+          if ! minikube status --output=json | grep -q '"Host": "Running"'; then
+            echo "Starting minikube…"
+            minikube start --driver="${MK_DRIVER}" --cpus="${MK_CPUS}" --memory="${MK_MEMORY}" "${EXTRA[@]}"
+          else
+            echo "Minikube already running."
+            # make sure flags are applied on next start; for now proceed
+          fi
+
+          # Set context for kubectl
+          kubectl config use-context minikube
+
+      - name: Enable addons (ingress, metrics)
+        run: |
+          set -euo pipefail
+          minikube addons enable ingress
+          minikube addons enable metrics-server
+          # Wait for ingress controller to be Ready
+          kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=120s
+
+      - name: (Optional) Create imagePullSecrets for private registries
+        run: |
+          set -euo pipefail
+
+          create_secret() {
+            local ns="$1" name="$2" server="$3" user="$4" pass="$5"
+            kubectl get ns "$ns" >/dev/null 2>&1 || kubectl create ns "$ns"
+            if kubectl -n "$ns" get secret "$name" >/dev/null 2>&1; then
+              echo "Secret $name already exists in $ns, patching…"
+              kubectl -n "$ns" delete secret "$name" --ignore-not-found
+            fi
+            kubectl -n "$ns" create secret docker-registry "$name" \
+              --docker-server="$server" --docker-username="$user" --docker-password="$pass"
+          }
+
+          # Docker Hub (if private)
+          if [[ -n "${DH_USER:-}" && -n "${DH_TOKEN:-}" ]]; then
+            for ns in "$NS_BACKEND" "$NS_WEB"; do
+              create_secret "$ns" "regcred-hub" "https://index.docker.io/v1/" "$DH_USER" "$DH_TOKEN"
+            done
+            echo "::notice::Created/updated Docker Hub imagePullSecrets in backend/web namespaces."
+          fi
+
+          # Local Nexus (if used)
+          if [[ "${REGISTRY_KIND:-hub}" == "nexus" && -n "${NEXUS_DOMAIN:-}" && -n "${NEXUS_USER:-}" && -n "${NEXUS_PASS:-}" ]]; then
+            for ns in "$NS_BACKEND" "$NS_WEB"; do
+              create_secret "$ns" "regcred-nexus" "http://${NEXUS_DOMAIN}" "$NEXUS_USER" "$NEXUS_PASS"
+            done
+            echo "::notice::Created/updated Nexus imagePullSecrets in backend/web namespaces."
+          fi
+
+      - name: Install/upgrade Argo CD (server as LoadBalancer)
+        run: |
+          set -euo pipefail
+          kubectl get ns "${ARGO_NS}" >/dev/null 2>&1 || kubectl create ns "${ARGO_NS}"
+          kubectl -n "${ARGO_NS}" get deploy/argocd-server >/dev/null 2>&1 || true
+
+          # Install if not present; upgrade if present
+          if ! kubectl -n "${ARGO_NS}" get deploy | grep -q argocd-server; then
+            echo "Installing Argo CD ${ARGO_VERSION}…"
+            kubectl -n "${ARGO_NS}" apply -f "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGO_VERSION}/manifests/install.yaml"
+            # Patch service to LoadBalancer (works with `minikube tunnel`)
+            kubectl -n "${ARGO_NS}" patch svc argocd-server -p '{"spec":{"type":"LoadBalancer"}}'
+          else
+            echo "Argo CD already installed; ensuring LoadBalancer service…"
+            kubectl -n "${ARGO_NS}" patch svc argocd-server -p '{"spec":{"type":"LoadBalancer"}}' --type=merge || true
+          fi
+
+          kubectl -n "${ARGO_NS}" rollout status deploy/argocd-server --timeout=180s
+          kubectl -n "${ARGO_NS}" rollout status deploy/argocd-repo-server --timeout=180s
+          kubectl -n "${ARGO_NS}" rollout status deploy/argocd-application-controller --timeout=180s
+
+          echo "::notice::Argo CD admin password:"
+          kubectl -n "${ARGO_NS}" get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d || true
+          echo
+
+      - name: (Optional) Add /etc/hosts for Ingress test domains
+        run: |
+          set -euo pipefail
+          # Resolve minikube IP
+          IP="$(minikube ip)"
+          echo "Minikube IP is: $IP"
+          # Add hostnames you use in your Helm values (web.mario.local, api.mario.local, grafana.mario.local, etc.)
+          HOSTS=(web.mario.local api.mario.local grafana.mario.local prometheus.mario.local alertmanager.mario.local)
+          for h in "${HOSTS[@]}"; do
+            if ! grep -qE "[[:space:]]$h(\$|[[:space:]])" /etc/hosts; then
+              echo "Adding $h -> $IP to /etc/hosts"
+              echo "$IP $h" | sudo tee -a /etc/hosts >/dev/null
+            else
+              echo "$h already present in /etc/hosts"
+            fi
+          done
+
+      - name: Reminder for LoadBalancers
+        run: |
+          echo "::notice::If you use LoadBalancer Services (Argo CD, etc.), run 'minikube tunnel' on the host to allocate external IPs."
 
 # ----------------------------------------------------------
 # Deploy to local minikube with Argo CD (App-of-Apps)
 # ----------------------------------------------------------
   k8s-argocd-minikube:
+
     name: Minikube + Argo CD (App-of-Apps)
     runs-on: [ self-hosted, macOS ]
     needs: [ setup, build-and-push-app, build-and-push-web, snyk-release ]
@@ -495,6 +654,24 @@ jobs:
       DOCKERHUB_REPO_WEB: ${{ secrets.DOCKERHUB_REPO_WEB }}   # e.g. itaef/supermario-front
     steps:
       - uses: actions/checkout@v4
+
+      - name: Ensure Minikube up
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v minikube >/dev/null; then
+            echo "Minikube not found on runner"; exit 1
+          fi
+          # Start if not running
+          if ! minikube status --format='{{.Host}} {{.Kubelet}} {{.APIServer}} {{.Kubeconfig}}' 2>/dev/null | grep -q 'Running'; then
+            minikube start --driver=docker --kubernetes-version=stable
+            minikube addons enable metrics-server || true
+          fi
+          kubectl config use-context minikube
+          kubectl get nodes -o wide
+
+      - name: Reminder - run tunnel locally
+        run: echo "If your Services use LoadBalancer, ensure 'minikube tunnel' is running on the Mac host."
 
       - name: Install kubectl, helm, minikube (idempotent)
         # brew is present on the Mac runner; this is safe to re-run
@@ -601,7 +778,8 @@ jobs:
 # Slack - Notify
 # ----------------------------------------------------------
 
-  notify-slack:
+  nootify-slack:
+
     if: ${{ always() }}
     needs:
       - resolve-target
@@ -614,6 +792,7 @@ jobs:
       - build-and-push-web
       - snyk-release
       - mirror-to-nexus
+      - prepare-minikube      # <-- add
       - deploy-ec2
       - deploy-mac
       - k8s-argocd-minikube
@@ -623,15 +802,18 @@ jobs:
     with:
       title: "Release: ${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
       status: >-
-        ${{ (needs['build-and-push-app'].result == 'failure'
-          || needs['build-and-push-web'].result == 'failure'
-          || needs['snyk-release'].result == 'failure'
-          || (needs.resolve-target.outputs.target == 'mac' && (
-               needs['mirror-to-nexus'].result == 'failure'
-            || needs['deploy-mac'].result == 'failure'
-            || needs['k8s-argocd-minikube'].result == 'failure'))
-          || (needs.resolve-target.outputs.target == 'ec2' && needs['deploy-ec2'].result == 'failure'))
-          && 'failure' || 'success' }}
+        ${{ (
+          needs['build-and-push-app'].result == 'failure' ||
+          needs['build-and-push-web'].result == 'failure' ||
+          needs['snyk-release'].result == 'failure' ||
+          (needs.resolve-target.outputs.target == 'mac' && (
+              needs['mirror-to-nexus'].result == 'failure' ||
+              needs['prepare-minikube'].result == 'failure' ||   # <-- add
+              needs['deploy-mac'].result == 'failure' ||
+              needs['k8s-argocd-minikube'].result == 'failure'
+          )) ||
+          (needs.resolve-target.outputs.target == 'ec2' && needs['deploy-ec2'].result == 'failure')
+        ) && 'failure' || 'success' }}
       only_on: "always"
       run_url: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
       message: "Actor: @${{ github.actor }} · Ref: ${{ github.ref_name }}"
