@@ -529,13 +529,14 @@ jobs:
           minikube version || true
 
       - name: Start/ensure Minikube
+        id: mkstart
         shell: bash
         env:
           MK_DRIVER: docker
           MK_CPUS: "4"
           MK_MEMORY: "6g"
           # Optional: request a specific k8s version (leave blank to reuse existing)
-          MK_K8S_VER: ${{ vars.MINIKUBE_K8S_VERSION }}   # e.g. v1.34.0  (or leave unset)
+          MK_K8S_VER: ${{ vars.MINIKUBE_K8S_VERSION }}   # e.g. v1.34.0
           # Optional: allow delete+recreate if version differs
           MK_ALLOW_RECREATE: ${{ vars.MINIKUBE_ALLOW_RECREATE || 'false' }}
           # Optional: use a dedicated profile
@@ -549,6 +550,11 @@ jobs:
             minikube status -p "${MK_PROFILE}" --output=json 2>/dev/null | grep -q '"Host": "Running"'
           }
 
+          current_version() {
+            minikube -p "${MK_PROFILE}" kubectl -- \
+              get nodes -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}' 2>/dev/null || true
+          }
+
           start_minikube() {
             echo "Starting minikube (profile=${MK_PROFILE})…"
             minikube start -p "${MK_PROFILE}" \
@@ -560,10 +566,8 @@ jobs:
 
           if is_running; then
             echo "Minikube is already running for profile ${MK_PROFILE}."
-            # If a version was requested, compare and decide what to do
             if [[ -n "${MK_K8S_VER:-}" ]]; then
-              CUR_VER="$(minikube -p "${MK_PROFILE}" kubectl -- \
-                get nodes -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}' 2>/dev/null || echo '')"
+              CUR_VER="$(current_version)"
               echo "Current cluster version: ${CUR_VER:-unknown}; requested: ${MK_K8S_VER}"
               if [[ -n "${CUR_VER}" && "${CUR_VER#v}" != "${MK_K8S_VER#v}" ]]; then
                 if [[ "${MK_ALLOW_RECREATE}" == "true" ]]; then
@@ -581,15 +585,22 @@ jobs:
 
           # Set kubectl context and show nodes
           kubectl config use-context "${MK_PROFILE}" >/dev/null
-          kubectl get nodes -o wide
+          kubectl get nodes -o wide || true
+
+          # Outputs for downstream jobs/steps
+          RUNNING="false"
+          if is_running; then RUNNING="true"; fi
+          VER="$(current_version)"
+          echo "running=${RUNNING}"       >> "$GITHUB_OUTPUT"
+          echo "k8s_version=${VER:-n/a}"  >> "$GITHUB_OUTPUT"
+          echo "profile=${MK_PROFILE}"    >> "$GITHUB_OUTPUT"
 
       - name: Enable addons (ingress, metrics)
+        if: ${{ steps.mkstart.outputs.running == 'true' }}
         run: |
-          set -euo pipefail
-          minikube addons enable ingress
-          minikube addons enable metrics-server
-          # Wait for ingress controller to be Ready
-          kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=120s
+          minikube -p "${{ steps.mkstart.outputs.profile }}" addons enable ingress
+          minikube -p "${{ steps.mkstart.outputs.profile }}" addons enable metrics-server
+          kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s
 
       - name: (Optional) Create imagePullSecrets for private registries
         run: |
