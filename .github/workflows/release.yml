@@ -528,48 +528,53 @@ jobs:
           helm version || true
           minikube version || true
 
-      - name: Start/ensure Minikube (no recreate; warn only)
+      - name: Start/ensure Minikube (no downgrade; warn only)
         shell: bash
         env:
           MK_PROFILE: ${{ vars.MINIKUBE_PROFILE || 'minikube' }}
-          MK_DRIVER: ${{ vars.MINIKUBE_DRIVER  || 'docker'   }}
-          MK_CPUS: ${{ vars.MINIKUBE_CPUS    || '4'        }}
-          MK_MEMORY: ${{ vars.MINIKUBE_MEMORY  || '6g'       }}
-          # Optional: if you set this, we’ll just WARN when it differs from the running cluster.
-          MK_K8S_VER: ${{ vars.MINIKUBE_K8S_VERSION }}   # e.g. v1.34.0 or leave unset
+          MK_DRIVER: ${{ vars.MINIKUBE_DRIVER || 'docker' }}
+          MK_CPUS: ${{ vars.MINIKUBE_CPUS || '4' }}
+          MK_MEMORY: ${{ vars.MINIKUBE_MEMORY || '6g' }}
+          # Optional: request a specific version; leave unset to reuse whatever is running
+          MK_K8S_VER: ${{ vars.MINIKUBE_K8S_VERSION }}   # e.g. v1.34.0 (do NOT set to lower than current)
         run: |
           set -euo pipefail
+
+          echo "Profile=${MK_PROFILE}; driver=${MK_DRIVER}; cpus=${MK_CPUS}; mem=${MK_MEMORY}; requested_k8s=${MK_K8S_VER:-<none>}"
 
           is_running() {
             minikube status -p "${MK_PROFILE}" --output=json 2>/dev/null | grep -q '"Host": "Running"'
           }
+
           current_version() {
             minikube -p "${MK_PROFILE}" kubectl -- \
               get nodes -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}' 2>/dev/null || true
           }
-          start_minikube() {
-            echo "Starting minikube (profile=${MK_PROFILE})..."
-            minikube start -p "${MK_PROFILE}" \
-              --driver="${MK_DRIVER}" \
-              --cpus="${MK_CPUS}" \
-              --memory="${MK_MEMORY}" \
-              ${MK_K8S_VER:+--kubernetes-version="${MK_K8S_VER}"}
-          }
 
           if is_running; then
-            echo "Minikube profile '${MK_PROFILE}' is already running."
-            CUR="$(current_version)"
-            echo "Current cluster version: ${CUR:-unknown}"
-            if [[ -n "${MK_K8S_VER:-}" && -n "${CUR}" && "${CUR#v}" != "${MK_K8S_VER#v}" ]]; then
-              echo "::warning::Requested Kubernetes ${MK_K8S_VER} but existing cluster is ${CUR}. Reusing existing cluster (no recreate)."
+            CUR_VER="$(current_version)"
+            echo "Minikube already running. Current k8s version: ${CUR_VER:-unknown}"
+
+            if [[ -n "${MK_K8S_VER:-}" ]]; then
+              # Compare major.minor.patch ignoring leading 'v'
+              if [[ -n "${CUR_VER:-}" && "${CUR_VER#v}" != "${MK_K8S_VER#v}" ]]; then
+                echo "::warning::Requested k8s ${MK_K8S_VER} differs from running ${CUR_VER}. Reusing existing cluster to avoid unsafe downgrade/upgrade."
+              fi
             fi
           else
-            # Only start when not running; if MK_K8S_VER is set, we’ll use it, otherwise default
-            start_minikube
+            # Build start args; only include --kubernetes-version if explicitly requested
+            ARGS=( -p "${MK_PROFILE}" --driver="${MK_DRIVER}" --cpus="${MK_CPUS}" --memory="${MK_MEMORY}" )
+            if [[ -n "${MK_K8S_VER:-}" ]]; then
+              ARGS+=( --kubernetes-version="${MK_K8S_VER}" )
+            fi
+            echo "Starting Minikube: minikube start ${ARGS[*]}"
+            minikube start "${ARGS[@]}"
           fi
 
-          # Point kubectl at the profile and show nodes
-          kubectl config use-context "${MK_PROFILE}" >/dev/null
+          # Ensure kubectl context points at this profile
+          kubectl config use-context "${MK_PROFILE}" >/dev/null 2>&1 || \
+            kubectl config set-context "${MK_PROFILE}" --cluster="${MK_PROFILE}" --user="${MK_PROFILE}" >/dev/null 2>&1 || true
+
           kubectl get nodes -o wide || true
 
       - name: Enable addons (ingress, metrics) — idempotent
@@ -603,7 +608,7 @@ jobs:
             kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s \
               || echo "::warning::ingress-nginx-controller not Ready yet."
           fi
-            
+
       - name: (Optional) Create imagePullSecrets for private registries
         run: |
           set -euo pipefail
