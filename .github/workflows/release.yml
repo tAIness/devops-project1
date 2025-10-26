@@ -529,20 +529,22 @@ jobs:
           minikube version || true
 
       - name: Start/ensure Minikube is running
+        shell: bash
         run: |
           set -euo pipefail
-          # Add insecure-registry flag if using local Nexus
-          EXTRA=()
+
+          # Build args list safely
+          args=( --driver="${MK_DRIVER}" --cpus="${MK_CPUS}" --memory="${MK_MEMORY}" )
           if [[ "${REGISTRY_KIND:-hub}" == "nexus" && -n "${NEXUS_DOMAIN:-}" ]]; then
-            EXTRA+=(--insecure-registry="${NEXUS_DOMAIN}")
+            args+=( --insecure-registry="${NEXUS_DOMAIN}" )
           fi
 
-          if ! minikube status --output=json | grep -q '"Host": "Running"'; then
+          if ! minikube status --output=json 2>/dev/null | grep -q '"Host": "Running"'; then
             echo "Starting minikube…"
-            minikube start --driver="${MK_DRIVER}" --cpus="${MK_CPUS}" --memory="${MK_MEMORY}" "${EXTRA[@]}"
+            minikube start "${args[@]}"
           else
             echo "Minikube already running."
-            # make sure flags are applied on next start; for now proceed
+            # (Flags like --insecure-registry take effect on next start)
           fi
 
           # Set context for kubectl
@@ -795,25 +797,14 @@ jobs:
       - deploy-ec2
       - deploy-mac
       - k8s-argocd-minikube
+      - summarize-status
     uses: tAIness/devops-ci-lib/.github/workflows/slack-notify.yml@main
     secrets: inherit
     with:
       title: "Release: ${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
-      # If any required step failed => 'failure', else 'success'
-      status: >-
-        ${{ (
-          needs['build-and-push-app'].result == 'failure' ||
-          needs['build-and-push-web'].result == 'failure' ||
-          needs['snyk-release'].result == 'failure' ||
-          (needs.resolve-target.outputs.target == 'mac' && (
-            needs['mirror-to-nexus'].result == 'failure' ||
-            needs['prepare-minikube'].result == 'failure' ||
-            needs['deploy-mac'].result == 'failure' ||
-            needs['k8s-argocd-minikube'].result == 'failure'
-          )) ||
-          (needs.resolve-target.outputs.target == 'ec2' &&
-            needs['deploy-ec2'].result == 'failure')
-        ) && 'failure' || 'success' }}
+      # Fails on any of: build app/web, snyk, (mac: mirror/prepare/deploy/argocd), (ec2: deploy)
+      status: ${{ needs['summarize-status'].outputs.status }}
       only_on: "always"
       run_url: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
-      message: "Actor: @${{ github.actor }} · Ref: ${{ github.ref_name }}"
+      message: "${{ needs['summarize-status'].outputs.message }}"
+  
