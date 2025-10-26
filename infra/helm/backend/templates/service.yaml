@@ -6,8 +6,8 @@ metadata:
   name: app-svc
 spec:
   selector:
-    app.kubernetes.io/name: {{ .Chart.Name | default "backend" }}
-    app.kubernetes.io/instance: {{ .Release.Name }}
+    app.kubernetes.io/name: {{ default .Chart.Name .Values.nameOverride | quote }}
+    app.kubernetes.io/instance: {{ .Release.Name | quote }}
   ports:
     - name: http
       port: {{ .Values.service.port }}
