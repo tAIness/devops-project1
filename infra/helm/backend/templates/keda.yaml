@@ -1,25 +1,17 @@
 # devops-project1/infra/helm/backend/templates/keda.yaml
 {{- if eq (default "none" .Values.autoscaling.mode) "keda" -}}
-{{- $name := (.Values.fullnameOverride | default (printf "%s-%s" .Release.Name (.Chart.Name))) -}}
-{{- $ns := .Release.Namespace -}}
-
-{{- $keda := .Values.autoscaling.keda | default dict -}}
-{{- $min := default 1 $keda.minReplicaCount -}}
-{{- $max := default 3 $keda.maxReplicaCount -}}
-
-{{- range $idx, $so := (default list $keda.scaledObjects) }}
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
-  name: {{ default (printf "%s-%d" $name $idx) $so.name | trunc 63 | trimSuffix "-" }}
-  namespace: {{ $ns }}
+  name: {{ .Values.fullnameOverride | default "app" }}
+  labels:
+    app.kubernetes.io/name: backend
+    app.kubernetes.io/instance: {{ .Release.Name }}
 spec:
   scaleTargetRef:
-    name: {{ $name }}
-  minReplicaCount: {{ default $min $so.minReplicaCount }}
-  maxReplicaCount: {{ default $max $so.maxReplicaCount }}
+    name: {{ .Values.fullnameOverride | default "app" }}
+  minReplicaCount: {{ .Values.autoscaling.keda.minReplicaCount | default 1 }}
+  maxReplicaCount: {{ .Values.autoscaling.keda.maxReplicaCount | default 3 }}
   triggers:
-{{ toYaml $so.triggers | indent 4 }}
----
+{{ toYaml (default list .Values.autoscaling.keda.triggers) | nindent 4 }}
 {{- end }}
-{{- end -}}

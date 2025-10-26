@@ -30,8 +30,7 @@ runtime:
   fixPasswd: false  # set true only if you still need the passwd overlay
 
 autoscaling:
-  mode: none                # one of: none | hpa | keda
-
+  mode: none          # "none" or "keda" or "hpa"
   hpa:
     minReplicas: 1
     maxReplicas: 3
@@ -40,21 +39,13 @@ autoscaling:
   keda:
     minReplicaCount: 1
     maxReplicaCount: 3
-# optional auths (empty is fine)
-    auths: []
-
-    # at least one ScaledObject to see KEDA resources
-    scaledObjects:
-      - name: http-queue
-        minReplicaCount: 1
-        maxReplicaCount: 3
-        triggers:
-          - type: prometheus
-            metadata:
-              serverAddress: http://prometheus-operated.monitoring.svc:9090
-              metricName: http_requests_pending
-              threshold: "100"
-              query: sum(rate(http_requests_pending[1m]))
+    triggers:
+      - type: prometheus
+        metadata:
+          serverAddress: http://prometheus-operated.monitoring.svc:9090
+          metricName: http_requests_pending
+          threshold: "100"
+          query: sum(rate(http_requests_pending[1m]))
 
 db:
   enabled: true
