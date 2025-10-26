@@ -675,30 +675,41 @@ jobs:
         if: ${{ always() }}
         shell: bash
         run: |
-          set -u
+          # Make this step non-fatal regardless of any non-zero exits.
+          set +e
+          # Keep "unset var" strictness and pipefail, but not -e:
+          set -u -o pipefail
+
           note=""
-          if [[ "${BUILD_IMAGES}" != "true" ]]; then
+          if [[ "${BUILD_IMAGES:-true}" != "true" ]]; then
             note="(builds skipped; using existing images)"
           fi
+
           failures=()
-          add_if_fail () { local n="$1" v="$2"; [[ "$v" == "failure" ]] && failures+=("$n"); }
-          add_if_fail "build-and-push-app" "$RES_BUILD_APP"
-          add_if_fail "build-and-push-web" "$RES_BUILD_WEB"
-          add_if_fail "snyk-release"       "$RES_SNYK"
+          add_if_fail () { local n="$1" v="${2:-}"; [[ "$v" == "failure" ]] && failures+=("$n"); }
+
+          add_if_fail "build-and-push-app" "${RES_BUILD_APP:-skipped}"
+          add_if_fail "build-and-push-web" "${RES_BUILD_WEB:-skipped}"
+          add_if_fail "snyk-release"       "${RES_SNYK:-skipped}"
+
           if [[ "${TARGET:-mac}" == "mac" ]]; then
-            add_if_fail "mirror-to-nexus"   "$RES_MIRROR"
-            add_if_fail "prepare-minikube"  "$RES_PREP"
-            add_if_fail "deploy-mac"        "$RES_DEPLOY_MAC"
+            add_if_fail "mirror-to-nexus"     "${RES_MIRROR:-skipped}"
+            add_if_fail "prepare-minikube"    "${RES_PREP:-skipped}"
+            add_if_fail "deploy-mac"          "${RES_DEPLOY_MAC:-skipped}"
+            # add_if_fail "k8s-argocd-minikube" "${RES_ARGO_MINI:-skipped}"  # include if you wire it in needs/env
           else
-            add_if_fail "deploy-ec2"        "$RES_DEPLOY_EC2"
+            add_if_fail "deploy-ec2"          "${RES_DEPLOY_EC2:-skipped}"
           fi
+
           if ((${#failures[@]})); then
-            echo "status=failure" >> "$GITHUB_OUTPUT"
-            printf "message=❌ Failed steps: %s · target=%s %s\n" "${failures[*]}" "${TARGET:-?}" "$note" >> "$GITHUB_OUTPUT"
+            echo "status=failure" >>"$GITHUB_OUTPUT"
+            printf 'message=%s\n' "❌ Failed steps: ${failures[*]} · target=${TARGET:-?} ${note}" >>"$GITHUB_OUTPUT"
           else
-            echo "status=success" >> "$GITHUB_OUTPUT"
-            printf "message=✅ All steps succeeded · target=%s %s\n" "${TARGET:-?}" "$note" >> "$GITHUB_OUTPUT"
+            echo "status=success" >>"$GITHUB_OUTPUT"
+            printf 'message=%s\n' "✅ All steps succeeded · target=${TARGET:-?} ${note}" >>"$GITHUB_OUTPUT"
           fi
+
+          # Force success so Slack can still send
           exit 0
 
   notify-slack:
