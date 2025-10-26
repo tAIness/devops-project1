@@ -776,13 +776,6 @@ jobs:
           kubectl config use-context minikube >/dev/null 2>&1 || true
           kubectl get nodes -o wide || true
 
-      - name: Pre-create namespaces
-        shell: bash
-        run: |
-          set -euo pipefail
-          kubectl get ns "${{ env.ARGO_NS }}" >/dev/null 2>&1 || kubectl create ns "${{ env.ARGO_NS }}"
-          kubectl get ns "${{ env.APP_NS }}"  >/dev/null 2>&1 || kubectl create ns "${{ env.APP_NS }}"
-
       - name: Install/Upgrade Argo CD via Helm (match existing release name)
         shell: bash
         env:
