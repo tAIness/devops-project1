@@ -3,15 +3,15 @@
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:
-  name: {{ .Values.fullnameOverride | default "app" }}
-  labels:
-    app.kubernetes.io/name: backend
-    app.kubernetes.io/instance: {{ .Release.Name }}
+  name: {{ include "backend.fullname" . | default "app" }}-http-queue
 spec:
   scaleTargetRef:
-    name: {{ .Values.fullnameOverride | default "app" }}
+    name: {{ include "backend.fullname" . | default "app" }}
   minReplicaCount: {{ .Values.autoscaling.keda.minReplicaCount | default 1 }}
   maxReplicaCount: {{ .Values.autoscaling.keda.maxReplicaCount | default 3 }}
+  {{- with .Values.autoscaling.keda.triggers }}
   triggers:
-{{ toYaml (default list .Values.autoscaling.keda.triggers) | nindent 4 }}
+{{ toYaml . | nindent 4 }}
+  {{- end }}
 {{- end }}
+
