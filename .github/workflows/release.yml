@@ -639,8 +639,9 @@ jobs:
 
     name: Minikube + Argo CD (App-of-Apps)
     runs-on: [ self-hosted, macOS ]
-    needs: [ setup, build-and-push-app, build-and-push-web, snyk-release ]
-    if: ${{ needs.resolve-target.outputs.target == 'mac' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
+    needs: [ resolve-target, setup, build-and-push-app, build-and-push-web, snyk-release ]
+    if: ${{ (needs.resolve-target.outputs.target || 'mac') == 'mac'
+      && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
     env:
       TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
 
@@ -774,7 +775,7 @@ jobs:
           path: k8s-all.txt
 
 # ----------------------------------------------------------
-# Slack - Notify
+# Slack summaries (global) and sender
 # ----------------------------------------------------------
   summarize-status:
     name: Summarize results for Slack
@@ -795,21 +796,20 @@ jobs:
       message: ${{ steps.sum.outputs.message }}
     env:
       TARGET: ${{ needs.resolve-target.outputs.target || 'mac' }}
-      RES_BUILD_APP: ${{ needs['build-and-push-app'].result   || 'skipped' }}
-      RES_BUILD_WEB: ${{ needs['build-and-push-web'].result   || 'skipped' }}
-      RES_SNYK: ${{ needs['snyk-release'].result         || 'skipped' }}
-      RES_MIRROR: ${{ needs['mirror-to-nexus'].result      || 'skipped' }}
-      RES_PREP: ${{ needs['prepare-minikube'].result     || 'skipped' }}
-      RES_DEPLOY_MAC: ${{ needs['deploy-mac'].result           || 'skipped' }}
-      RES_DEPLOY_EC2: ${{ needs['deploy-ec2'].result           || 'skipped' }}
-      RES_ARGO_MINI: ${{ needs['k8s-argocd-minikube'].result  || 'skipped' }}
+      RES_BUILD_APP: ${{ needs['build-and-push-app'].result      || 'skipped' }}
+      RES_BUILD_WEB: ${{ needs['build-and-push-web'].result      || 'skipped' }}
+      RES_SNYK: ${{ needs['snyk-release'].result            || 'skipped' }}
+      RES_MIRROR: ${{ needs['mirror-to-nexus'].result         || 'skipped' }}
+      RES_PREP: ${{ needs['prepare-minikube'].result        || 'skipped' }}
+      RES_DEP_MAC: ${{ needs['deploy-mac'].result              || 'skipped' }}
+      RES_DEP_EC2: ${{ needs['deploy-ec2'].result              || 'skipped' }}
+      RES_ARGO_MINI: ${{ needs['k8s-argocd-minikube'].result     || 'skipped' }}
     steps:
       - id: sum
-        name: Build Slack status/message
-        if: ${{ always() }}
+        # Important: do NOT use `-e` here so this step never fails
         shell: bash
         run: |
-          set -u  # (no -e so this step can never bail early)
+          set -u
           failures=()
           add_if_fail () { local n="$1" v="$2"; [[ "$v" == "failure" ]] && failures+=("$n"); }
 
@@ -820,34 +820,34 @@ jobs:
           if [[ "${TARGET:-mac}" == "mac" ]]; then
             add_if_fail "mirror-to-nexus"       "$RES_MIRROR"
             add_if_fail "prepare-minikube"      "$RES_PREP"
-            add_if_fail "deploy-mac"            "$RES_DEPLOY_MAC"
+            add_if_fail "deploy-mac"            "$RES_DEP_MAC"
             add_if_fail "k8s-argocd-minikube"   "$RES_ARGO_MINI"
           else
-            add_if_fail "deploy-ec2"            "$RES_DEPLOY_EC2"
+            add_if_fail "deploy-ec2"            "$RES_DEP_EC2"
           fi
 
           if ((${#failures[@]})); then
             echo "status=failure" >> "$GITHUB_OUTPUT"
-            printf "message=❌ Failed steps: %s · target=%s\n" "${failures[*]}" "${TARGET:-?}" >> "$GITHUB_OUTPUT"
+            printf 'message=❌ Failed steps: %s · target=%s\n' "${failures[*]}" "${TARGET:-?}" >> "$GITHUB_OUTPUT"
           else
             echo "status=success" >> "$GITHUB_OUTPUT"
-            printf "message=✅ All steps succeeded · target=%s\n" "${TARGET:-?}" >> "$GITHUB_OUTPUT"
+            printf 'message=✅ All steps succeeded · target=%s\n' "${TARGET:-?}" >> "$GITHUB_OUTPUT"
           fi
 
-          # Make 100% sure this step never fails:
+          # Never fail this step
           exit 0
 
   notify-slack:
+    name: notify-slack / send
     if: ${{ always() }}
     needs:
       - setup
-      - resolve-target
       - summarize-status
     uses: tAIness/devops-ci-lib/.github/workflows/slack-notify.yml@main
     secrets: inherit
     with:
       title: "Release: ${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
-      status: "${{ needs.summarize-status.outputs.status || 'failure' }}"
-      message: "${{ needs.summarize-status.outputs.message }} · Actor: @${{ github.actor }} · Ref: ${{ github.ref_name }}"
+      status: ${{ needs.summarize-status.outputs.status }}
+      message: ${{ needs.summarize-status.outputs.message }}
       only_on: "always"
       run_url: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
