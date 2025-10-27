@@ -16,21 +16,10 @@ ingress:
   useRegex: false
 
 secrets:
-  # create the Secret with DB credentials used by Postgres + initContainer
-  createDbCreds: true
-  dbCreds:
-    POSTGRES_DB: mario
-    POSTGRES_USER: mario
-    POSTGRES_PASSWORD: mario123
-
-  # create the Secret with DATABASE_URL used by the app container
-  createDbConn: true
-  dbConn:
-    # templated so Helm renders the right URL automatically
-    url: >-
-      postgresql://{{ .Values.secrets.dbCreds.POSTGRES_USER }}:{{ .Values.secrets.dbCreds.POSTGRES_PASSWORD }}
-      @{{ .Values.db.service.name }}:{{ .Values.db.service.port }}/{{ .Values.secrets.dbCreds.POSTGRES_DB }}
-
+  createDbCreds: false
+  dbCreds: {}
+  createDbConn: false
+  dbConn: {}
 
 runtime:
   fixPasswd: false  # set true only if you still need the passwd overlay
