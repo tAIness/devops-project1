@@ -5,7 +5,7 @@ global:
   targetRevision: main
   releaseTag: "v1.0.180"
 project:
-  enabled: true
+  enabled: false
   name: default
 apps:
   - name: backend
