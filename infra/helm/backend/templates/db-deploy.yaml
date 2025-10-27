@@ -68,3 +68,4 @@ spec:
           persistentVolumeClaim:
             claimName: pg-data
 {{- end }}
+
