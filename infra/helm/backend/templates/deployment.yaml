@@ -1,6 +1,7 @@
 # devops-project1/infra/helm/backend/templates/deployment.yaml
 {{- $name := default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
 {{- $fullname := (.Values.fullnameOverride | default (printf "%s-%s" .Release.Name $name)) | trunc 63 | trimSuffix "-" -}}
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -25,7 +26,6 @@ spec:
         - name: etc-passwd
           emptyDir: {}
       {{- end }}
-
       initContainers:
         {{- if (default false (get (default (dict) .Values.runtime) "fixPasswd")) }}
         - name: fix-passwd
@@ -64,11 +64,10 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.db.secrets.credsName | default "db-secrets" }}
                   key: POSTGRES_DB
-
       containers:
         - name: app
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag | default .Chart.AppVersion }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
+          image: "{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}"
+          imagePullPolicy: {{ default "IfNotPresent" .Values.image.pullPolicy }}
           ports:
             - name: http
               containerPort: {{ .Values.service.port }}

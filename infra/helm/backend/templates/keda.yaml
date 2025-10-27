@@ -1,5 +1,6 @@
 # devops-project1/infra/helm/backend/templates/keda.yaml
-{{- if eq (default "none" .Values.autoscaling.mode) "keda" }}
+{{- if eq (default "none" .Values.autoscaling.mode) "keda" -}}
+---
 apiVersion: keda.sh/v1alpha1
 kind: ScaledObject
 metadata:

@@ -1,5 +1,6 @@
 # devops-project1/infra/helm/backend/templates/hpa.yaml
-{{- if eq (default "none" .Values.autoscaling.mode) "hpa" }}
+{{- if eq (default "none" .Values.autoscaling.mode) "hpa" -}}
+---
 apiVersion: autoscaling/v2
 kind: HorizontalPodAutoscaler
 metadata:

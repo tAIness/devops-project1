@@ -1,5 +1,6 @@
 # infra/helm/backend/templates/service.yaml
 {{- $name := default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
+---
 apiVersion: v1
 kind: Service
 metadata:
