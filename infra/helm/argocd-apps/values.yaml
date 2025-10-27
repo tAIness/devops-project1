@@ -15,7 +15,7 @@ apps:
       argocd.argoproj.io/sync-wave: "0"
     helm:
       version: v3
-      values:
+      valuesObject:
         image:
           repository: docker.io/itaef/supermario-service
           tag: "" # Chart.appVersion
