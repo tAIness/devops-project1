@@ -4,9 +4,11 @@ global:
   repoURL: https://github.com/tAIness/devops-project1.git
   targetRevision: main
   releaseTag: "v1.0.185"
+
 project:
   enabled: false
   name: default
+
 apps:
   - name: backend
     path: infra/helm/backend
@@ -15,15 +17,21 @@ apps:
       argocd.argoproj.io/sync-wave: "0"
     helm:
       version: v3
-      valuesObject:
-        image:
-          repository: docker.io/itaef/supermario-service
-          tag: "" # Chart.appVersion
     values:
+      # Top-level chart values
+      fullnameOverride: "app"
+      service:
+        port: 8000
+
+      image:
+        repository: docker.io/itaef/supermario-service
+        tag: ""  # uses .Chart.AppVersion
+
       ingress:
         enabled: true
         host: api.mario.local
         useRegex: false
+
       secrets:
         createDbCreds: true
         createDbConn: true
@@ -31,30 +39,37 @@ apps:
           POSTGRES_DB: mario
           POSTGRES_USER: mario
           POSTGRES_PASSWORD: mario123
-      dbConn:
-        url: "postgres://mario:mario123@db:5432/mario"
+        dbConn:
+          url: "postgresql://mario:mario123@db:5432/mario"
+
       db:
         enabled: true
+        image: postgres:15
         storage:
           size: 1Gi
-        storageClassName: standard
-        service: {name: db, port: 5432}
+          storageClassName: standard
+        service:
+          name: db
+          port: 5432
+        secrets:
+          credsName: db-secrets
+
   - name: web
     path: infra/helm/web
     destinationNamespace: mario-web
     annotations:
-      argocd.argoproj.io/sync-wave: "10" # deploy after backend
+      argocd.argoproj.io/sync-wave: "10"
     helm:
-      values:
-        image:
-          repository: docker.io/itaef/supermario-front
-          tag: "" # Chart.appVersion
+      version: v3
     values:
+      image:
+        repository: docker.io/itaef/supermario-front
+        tag: ""
       ingress:
         enabled: true
         host: web.mario.local
+
 helmApps:
-  # Install KEDA first so ScaledObject CRDs exist
   - name: keda
     destinationNamespace: keda
     annotations:
@@ -64,7 +79,8 @@ helmApps:
       chart: keda
       targetRevision: 2.14.0
     helm:
-      values: "" # optional overrides
+      values: ""
+
   - name: monitoring
     destinationNamespace: monitoring
     annotations:
@@ -119,6 +135,7 @@ helmApps:
                   resources:
                     requests:
                       storage: 1Gi
+
 secrets:
   - namespace: monitoring
     name: grafana-admin

@@ -1,5 +1,5 @@
 # devops-project1/infra/helm/backend/templates/deployment.yaml
-{{- $name := default .Chart.Name .Values.nameOverride -}}
+{{- $name := default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
 {{- $fullname := (.Values.fullnameOverride | default (printf "%s-%s" .Release.Name $name)) | trunc 63 | trimSuffix "-" -}}
 apiVersion: apps/v1
 kind: Deployment
