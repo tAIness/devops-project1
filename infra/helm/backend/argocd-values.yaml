@@ -16,6 +16,7 @@ secrets:
     POSTGRES_USER: mario
     POSTGRES_PASSWORD: mario123
 
+
 dbConn:
   url: "postgres://mario:mario123@db:5432/mario"
 
