@@ -16,15 +16,11 @@ ingress:
   useRegex: false
 
 secrets:
-  # prevent Argo “RepeatedResourceWarning” by default
-  createDbConn: true
-  createDbCreds: true
-  dbConn:
-    url: ""                 # set only if createDbConn=true
-  dbCreds:
-    POSTGRES_DB: mario
-    POSTGRES_USER: mario
-    POSTGRES_PASSWORD: mario123
+  createDbConn: false
+  createDbCreds: false
+  dbConn: {}
+  dbCreds: {}
+
 
 runtime:
   fixPasswd: false  # set true only if you still need the passwd overlay
