@@ -30,13 +30,14 @@ apps:
       values:
         secrets:
           createDbCreds: true
-          dbCreds:
+          dbCredsB64:
             POSTGRES_DB: bWFyaW8=
             POSTGRES_USER: bWFyaW8=
             POSTGRES_PASSWORD: bWFyaW8xMjM=
           createDbConn: true
-          dbConn:
-            url: "postgresql://mario:mario123@db:5432/mario"
+          dbConnB64:
+            # echo -n 'postgresql://mario:mario123@db:5432/mario' | base64
+            url: cG9zdGdyZXNxbDovL21hcmlvOm1hcmlvMTIzQGRiOjU0MzIvbWFyaW8=
       db:
         enabled: true
         image: postgres:15
