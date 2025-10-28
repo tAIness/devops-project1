@@ -4,9 +4,11 @@ global:
   repoURL: https://github.com/tAIness/devops-project1.git
   targetRevision: main
   releaseTag: "v1.0.191"
+
 project:
   enabled: false
   name: default
+
 apps:
   - name: backend
     path: infra/helm/backend
@@ -16,28 +18,35 @@ apps:
     helm:
       version: v3
     values:
-      # Top-level chart values
       fullnameOverride: "app"
-      service:
-        port: 8000
+
       image:
         repository: docker.io/itaef/supermario-service
-        tag: "" # uses .Chart.AppVersion
+        tag: ""                  # use .Chart.AppVersion
+        pullPolicy: IfNotPresent
+
+      service:
+        port: 8000
+
       ingress:
         enabled: true
         host: api.mario.local
         useRegex: false
-      values:
-        secrets:
-          createDbCreds: true
-          dbCredsB64:
-            POSTGRES_DB: bWFyaW8=
-            POSTGRES_USER: bWFyaW8=
-            POSTGRES_PASSWORD: bWFyaW8xMjM=
-          createDbConn: true
-          dbConnB64:
-            # echo -n 'postgresql://mario:mario123@db:5432/mario' | base64
-            url: cG9zdGdyZXNxbDovL21hcmlvOm1hcmlvMTIzQGRiOjU0MzIvbWFyaW8=
+
+      secrets:
+        # Use base64 data for the Postgres credentials Secret
+        createDbCreds: true
+        dbCredsB64:
+          POSTGRES_DB: bWFyaW8=
+          POSTGRES_USER: bWFyaW8=
+          POSTGRES_PASSWORD: bWFyaW8xMjM=
+
+        # Use base64 data for the app's DATABASE_URL Secret
+        createDbConn: true
+        dbConnB64:
+          # echo -n 'postgresql://mario:mario123@db:5432/mario' | base64
+          url: cG9zdGdyZXNxbDovL21hcmlvOm1hcmlvMTIzQGRiOjU0MzIvbWFyaW8=
+
       db:
         enabled: true
         image: postgres:15
@@ -49,6 +58,7 @@ apps:
           port: 5432
         secrets:
           credsName: db-secrets
+
   - name: web
     path: infra/helm/web
     destinationNamespace: mario-web
@@ -63,6 +73,7 @@ apps:
       ingress:
         enabled: true
         host: web.mario.local
+
 helmApps:
   - name: keda
     destinationNamespace: keda
@@ -74,6 +85,7 @@ helmApps:
       targetRevision: 2.14.0
     helm:
       values: ""
+
   - name: monitoring
     destinationNamespace: monitoring
     annotations:
@@ -128,6 +140,7 @@ helmApps:
                   resources:
                     requests:
                       storage: 1Gi
+
 secrets:
   - namespace: monitoring
     name: grafana-admin
