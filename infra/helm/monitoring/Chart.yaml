@@ -3,4 +3,4 @@ name: monitoring-extras
 description: Extra monitoring bits (NGINX metrics + ServiceMonitor)
 type: application
 version: 0.1.0
-appVersion: "v1.0.192"
+appVersion: "v1.0.193"
