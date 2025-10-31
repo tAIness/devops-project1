@@ -16,14 +16,18 @@ spec:
     targetRevision: {{ default "main" (default $app.targetRevision $.Values.global.targetRevision) }}
     path: {{ $app.path }}
     helm:
-      values: |
-{{ toYaml ($app.helm.values | default dict) | nindent 8 }}
-{{ toYaml ($app.values       | default dict) | nindent 8 }}
+      version: {{ default "v3" (dig "helm" "version" "v3" $app) | quote }}
+      {{- /* merge app.helm.values (lower priority) + app.values (higher priority) */ -}}
+      {{- $hv := (dig "helm" "values" dict $app) | default dict -}}
+      {{- $av := ($app.values | default dict) -}}
+      {{- $merged := merge (deepCopy $hv) $av -}}
+      valuesObject:
+        {{- toYaml $merged | nindent 8 }}
   info:
     - name: Release
       value: {{ default "unknown" $.Values.global.releaseTag | quote }}
     - name: Image
-      value: {{ $repo := (dig "image" "repository" "" ($app.helm.values | default dict)) | default (dig "image" "repository" "" ($app.values | default dict)) }}{{ $tag := (dig "image" "tag" "" ($app.helm.values | default dict)) | default (dig "image" "tag" "" ($app.values | default dict)) | default $.Values.global.releaseTag }}{{ if $repo }}{{ printf "%s:%s" $repo $tag | quote }}{{ else }}"unknown"{{ end }}
+      value: {{ $repo := (dig "image" "repository" "" $merged) }}{{ $tag := (dig "image" "tag" "" $merged) | default $.Values.global.releaseTag }}{{ if $repo }}{{ printf "%s:%s" $repo $tag | quote }}{{ else }}"unknown"{{ end }}
   syncPolicy:
     automated:
       prune: true
@@ -31,7 +35,7 @@ spec:
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
-      # - Replace=true   # <-- REMOVED to avoid immutable PVC errors
+      # - Replace=true   # keep disabled to avoid immutable PVC issues
   ignoreDifferences:
     - group: ""
       kind: PersistentVolumeClaim
@@ -61,15 +65,16 @@ spec:
     chart: {{ $h.source.chart }}
     targetRevision: {{ $h.source.targetRevision }}
     helm:
+      {{- $hv := (dig "helm" "values" nil $h) -}}
+      {{- if $hv }}
+        {{- if kindIs "string" $hv }}
       values: |
-{{- $hv := (dig "helm" "values" nil $h) -}}
-{{- if $hv }}
-{{- if kindIs "string" $hv }}
 {{ $hv | nindent 8 }}
-{{- else }}
+        {{- else }}
+      valuesObject:
 {{ toYaml $hv | nindent 8 }}
-{{- end }}
-{{- end }}
+        {{- end }}
+      {{- end }}
   info:
     - name: Chart
       value: "{{ $h.source.chart }}@{{ $h.source.targetRevision }}"
