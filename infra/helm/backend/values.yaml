@@ -1,4 +1,3 @@
-# /devops-project1/infra/helm/backend/values.yaml
 image:
   repository: docker.io/itaef/supermario-service
   tag: ""                    # ← empty means “use .Chart.AppVersion”
@@ -15,6 +14,7 @@ ingress:
   host: api.mario.local
   useRegex: false
 
+# Secrets are disabled by default here. They are enabled via argocd-apps values.
 secrets:
   createDbCreds: false
   dbCreds: {}
@@ -30,7 +30,6 @@ autoscaling:
     minReplicas: 1
     maxReplicas: 3
     targetCPUUtilizationPercentage: 80
-
   keda:
     minReplicaCount: 1
     maxReplicaCount: 3
@@ -47,6 +46,6 @@ db:
   image: postgres:15
   storage:
     size: 1Gi
+    # storageClassName can be set via argocd-apps values if needed
   service: { name: db, port: 5432 }
   secrets: { credsName: db-secrets }
-

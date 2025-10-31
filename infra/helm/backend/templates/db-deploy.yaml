@@ -5,15 +5,17 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: db
-  namespace: {{ .Release.Namespace }}
-  labels: { app: mario-db }
+  labels:
+    app: mario-db
 spec:
   replicas: 1
   selector:
-    matchLabels: { app: mario-db }
+    matchLabels:
+      app: mario-db
   template:
     metadata:
-      labels: { app: mario-db }
+      labels:
+        app: mario-db
     spec:
       securityContext:
         fsGroup: 999
@@ -37,13 +39,13 @@ spec:
 
       containers:
         - name: postgres
-          image: postgres:15
+          image: {{ .Values.db.image | default "postgres:15" | quote }}
           env:
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
           envFrom:
             - secretRef:
-                name: {{ default "db-secrets" .Values.db.secrets.credsName }}
+                name: {{ default "db-secrets" .Values.db.secrets.credsName | quote }}
           ports:
             - containerPort: 5432
           readinessProbe:
@@ -68,4 +70,3 @@ spec:
           persistentVolumeClaim:
             claimName: pg-data
 {{- end }}
-
