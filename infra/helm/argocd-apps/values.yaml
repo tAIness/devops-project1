@@ -3,14 +3,11 @@ global:
   argoNamespace: argocd
   repoURL: https://github.com/tAIness/devops-project1.git
   targetRevision: main
-
   # (optional) your release flow can read this; not used directly by the backend chart
-  releaseTag: ""
-
+  releaseTag: "v1.0.196"
 project:
   enabled: false
   name: default
-
 apps:
   - name: backend
     path: infra/helm/backend
@@ -21,20 +18,16 @@ apps:
       version: v3
     values:
       fullnameOverride: "app"
-
       image:
         repository: docker.io/itaef/supermario-service
-        tag: ""                  # use .Chart.AppVersion
+        tag: "" # use .Chart.AppVersion
         pullPolicy: IfNotPresent
-
       service:
         port: 8000
-
       ingress:
         enabled: true
         host: api.mario.local
         useRegex: false
-
       # ---- important: these values drive the Secret templates ----
       secrets:
         # Postgres creds secret (db-secrets)
@@ -48,7 +41,6 @@ apps:
         dbConnB64:
           # echo -n 'postgresql://mario:mario123@db:5432/mario' | base64
           url: cG9zdGdyZXNxbDovL21hcmlvOm1hcmlvMTIzQGRiOjU0MzIvbWFyaW8=
-
       db:
         enabled: true
         image: postgres:15
@@ -60,7 +52,6 @@ apps:
           port: 5432
         secrets:
           credsName: db-secrets
-
   - name: web
     path: infra/helm/web
     destinationNamespace: mario-web
@@ -71,11 +62,10 @@ apps:
     values:
       image:
         repository: docker.io/itaef/supermario-front
-        tag: ""                  # use .Chart.AppVersion
+        tag: "" # use .Chart.AppVersion
       ingress:
         enabled: true
         host: web.mario.local
-
 helmApps:
   - name: keda
     destinationNamespace: keda
@@ -87,7 +77,6 @@ helmApps:
       targetRevision: 2.14.0
     helm:
       values: ""
-
   - name: monitoring
     destinationNamespace: monitoring
     annotations:
@@ -142,7 +131,6 @@ helmApps:
                   resources:
                     requests:
                       storage: 1Gi
-
 secrets:
   - namespace: monitoring
     name: grafana-admin
