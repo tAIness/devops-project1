@@ -5,7 +5,7 @@ global:
   targetRevision: main
 
   # (optional) your release flow can read this; not used directly by the backend chart
-  releaseTag: "v1.0.194"
+  releaseTag: ""
 
 project:
   enabled: false
