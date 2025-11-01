@@ -1,24 +1,31 @@
+# devops-project1/infra/k8s/argocd/apps/argocd-apps.yaml
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
   name: argocd-apps
-  namespace: argocd-apps
+  namespace: argocd
 spec:
   project: default
   source:
-    repoURL: https://github.com/tAIness/devops-project1.git   # your repo
-    targetRevision: main                                      # prefer a fixed branch over HEAD
-    path: infra/helm/argocd-apps-apps
-    helm:
-      values: |
-        global:
-          repoURL: https://github.com/tAIness/devops-project1.git
-          targetRevision: main
-          clusterServer: https://kubernetes.default.svc
+    repoURL: https://github.com/tAIness/devops-project1.git
+    targetRevision: main
+    path: infra/helm/argocd-apps
   destination:
     server: https://kubernetes.default.svc
-    namespace: argocd-apps
+    namespace: argocd
   syncPolicy:
     automated:
       prune: true
       selfHeal: true
+    syncOptions:
+      - CreateNamespace=true
+      - ServerSideApply=true
+    # optional retries:
+    # retry:
+    #   limit: 5
+    #   backoff:
+    #     duration: "5s"
+    #     factor: 2
+    #     maxDuration: "3m"
+
+
