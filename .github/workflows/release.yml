@@ -656,16 +656,71 @@ jobs:
           echo "ArgoCD ingress:"
           kubectl -n argocd get ingress -o wide
 
-      - name: Optional curl smoke (best effort)
+      - name: Wait for ingress controller & discover NodePort
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          # 1) Wait for ingress controller pods to be ready
+          kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s
+
+          # 2) Wait for endpoints (controller has a ready pod behind the service)
+          ATTEMPTS=30
+          until kubectl -n ingress-nginx get endpoints ingress-nginx-controller -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null | grep -qE '.'; do
+            ((ATTEMPTS--)) || { echo "No endpoints for ingress-nginx-controller"; kubectl -n ingress-nginx get all -o wide; exit 1; }
+            echo "Waiting for ingress-nginx-controller endpoints…"
+            sleep 5
+          done
+
+          # 3) Discover NodePort for HTTP (80)
+          export MK_IP="$(minikube ip)"
+          export HTTP_NODEPORT="$(kubectl -n ingress-nginx get svc ingress-nginx-controller -o jsonpath='{.spec.ports[?(@.port==80)].nodePort}')"
+          echo "MINIKUBE_IP=${MK_IP}"
+          echo "HTTP_NODEPORT=${HTTP_NODEPORT}"
+
+          # 4) Quick sanity: is the nodeport open?
+          if command -v nc >/dev/null 2>&1; then
+            if ! nc -z "${MK_IP}" "${HTTP_NODEPORT}"; then
+              echo "::warning::NodePort ${HTTP_NODEPORT} not open yet on ${MK_IP}. Continuing; curl step may retry."
+            fi
+          fi
+
+          # Export for next step
+          {
+            echo "MK_IP=${MK_IP}"
+            echo "HTTP_NODEPORT=${HTTP_NODEPORT}"
+          } >> "$GITHUB_ENV"
+
+      - name: Smoke test Ingress (host->cluster) with fallback to in-cluster curl
         shell: bash
         run: |
           set +e
           which curl >/dev/null 2>&1 || { echo "curl not found; skipping"; exit 0; }
-          echo "Testing hosts (HTTP -> expect 301/307 to HTTPS if configured by NGINX)…"
+          
+          echo "Testing via host (NodePort) — expect 200/301/307"
           for h in web.mario.local api.mario.local argo.mario.local; do
             echo "== $h =="
-            curl -I --max-time 5 -H "Host: $h" "http://$(minikube ip)" || true
+            # Try NodePort on MINIKUBE_IP
+            curl -sS -I --max-time 10 -H "Host: $h" "http://${MK_IP}:${HTTP_NODEPORT}" || echo "host->${MK_IP}:${HTTP_NODEPORT} failed for $h"
+            echo
           done
+          
+          echo "If host tests failed, try in-cluster curl (always validates routing inside the cluster)"
+          kubectl -n kube-system delete pod curl-tester --ignore-not-found
+          kubectl -n kube-system run curl-tester --restart=Never --image=curlimages/curl:8.10.1 -- sleep 120 &
+          # Wait for the pod to be running
+          kubectl -n kube-system wait --for=condition=Ready pod/curl-tester --timeout=60s || true
+          
+          for h in web.mario.local api.mario.local argo.mario.local; do
+            echo "== in-cluster: $h =="
+            kubectl -n kube-system exec curl-tester -- sh -lc \
+              "curl -sS -I --max-time 10 -H 'Host: ${h}' http://ingress-nginx-controller.ingress-nginx.svc.cluster.local" \
+              || echo "in-cluster curl failed for $h"
+            echo
+          done
+          
+          # Cleanup (best effort)
+          kubectl -n kube-system delete pod curl-tester --ignore-not-found || true
 
   # ----------------------------------------------------------
   # Slack summaries (global + minikube-only) and sender
