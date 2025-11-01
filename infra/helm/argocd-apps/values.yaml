@@ -64,34 +64,28 @@ helmApps:
   - name: argocd
     destinationNamespace: argocd
     annotations:
-      argocd.argoproj.io/sync-wave: "-20"
+       argocd.argoproj.io/sync-wave: "-20"
     source:
       repoURL: https://argoproj.github.io/argo-helm
       chart: argo-cd
       targetRevision: 6.7.12
     helm:
       values: |-
-        fullnameOverride: argocd   # ensures names like argocd-server, argocd-repo-server, etc.
-
         global:
           domain: argo.mario.local
-
+          
         server:
           service:
-            type: ClusterIP        # do NOT expose on node ports / LB
+            type: ClusterIP
           ingress:
             enabled: true
             ingressClassName: nginx
             hosts:
               - argo.mario.local
-            # tls:
-            #   - secretName: argocd-tls
-            #     hosts: [argo.mario.local]
-
         configs:
           params:
+            server.insecure: true
 
-            server.insecure: true  # dev only; remove for prod
   # --- KEDA ---
   - name: keda
     destinationNamespace: keda

@@ -555,42 +555,48 @@ jobs:
           minikube addons enable metrics-server
           kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s || \
           kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller-admission --timeout=180s || true
-      - name: Install/upgrade Argo CD (server as LoadBalancer)
+
+      - name: Bootstrap Argo CD via upstream manifests (ClusterIP service)
         shell: bash
+        env:
+          ARGO_NS: argocd
+          ARGO_VERSION: "v2.11.7"
         run: |
           set -euo pipefail
           kubectl get ns "${ARGO_NS}" >/dev/null 2>&1 || kubectl create ns "${ARGO_NS}"
-          if ! kubectl -n "${ARGO_NS}" get deploy | grep -q argocd-server; then
-            echo "Installing Argo CD ${ARGO_VERSION}…"
-            kubectl -n "${ARGO_NS}" apply -f "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGO_VERSION}/manifests/install.yaml"
-            kubectl -n "${ARGO_NS}" patch svc argocd-server -p '{"spec":{"type":"LoadBalancer"}}' || true
-          else
-            echo "Argo CD already installed; ensuring LoadBalancer service…"
-            kubectl -n "${ARGO_NS}" patch svc argocd-server -p '{"spec":{"type":"LoadBalancer"}}' --type=merge || true
-          fi
+            
+          # Install (or update) upstream Argo CD
+          kubectl -n "${ARGO_NS}" apply -f "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGO_VERSION}/manifests/install.yaml"
+            
+          # Force server service to ClusterIP so only Ingress will expose it later
+          kubectl -n "${ARGO_NS}" patch svc argocd-server --type=merge -p '{"spec":{"type":"ClusterIP"}}' || true
+            
+          # Wait for core components (best effort)
           kubectl -n "${ARGO_NS}" rollout status deploy/argocd-server --timeout=180s || true
           kubectl -n "${ARGO_NS}" rollout status deploy/argocd-repo-server --timeout=180s || true
           kubectl -n "${ARGO_NS}" rollout status deploy/argocd-application-controller --timeout=180s || \
           kubectl -n "${ARGO_NS}" rollout status statefulset/argocd-application-controller --timeout=180s || true
+            
           echo "::notice::Argo CD admin password:"
           kubectl -n "${ARGO_NS}" get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -d || true
           echo
+
       - name: Add /etc/hosts for test domains (best effort)
         shell: bash
         run: |
           set -euo pipefail
-          IP="$(minikube ip || echo 127.0.0.1)"
-          HOSTS=(web.mario.local api.mario.local grafana.mario.local prometheus.mario.local alertmanager.mario.local)
-          for h in "${HOSTS[@]}"; do
-            if ! grep -qE "[[:space:]]$h(\$|[[:space:]])" /etc/hosts; then
-              echo "$IP $h" | sudo tee -a /etc/hosts >/dev/null || true
-            fi
-          done
+         IP="$(minikube ip || echo 127.0.0.1)"
+         HOSTS=(web.mario.local api.mario.local grafana.mario.local prometheus.mario.local alertmanager.mario.local argo.mario.local)
+         for h in "${HOSTS[@]}"; do
+          if ! grep -qE "[[:space:]]$h(\$|[[:space:]])" /etc/hosts; then
+            echo "$IP $h" | sudo tee -a /etc/hosts >/dev/null || true
+          fi
+         done
 
   # ----------------------------------------------------------
   # Deploy to local minikube with Argo CD (App-of-Apps)
   # ----------------------------------------------------------
-  kk8s-argocd-minikube:
+  k8s-argocd-minikube:
     name: Minikube + Argo CD (App-of-Apps)
     runs-on: [ self-hosted, macOS ]
     needs: [ resolve-target, resolve-build-mode, prepare-minikube ]
@@ -601,7 +607,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # ---- Option A: Adopt pre-existing namespaces so Helm can own them ----
       - name: Adopt app namespaces to Helm ownership (idempotent)
         shell: bash
         env:
@@ -626,7 +631,6 @@ jobs:
           adopt mario-web
           adopt monitoring
 
-      # ---- Install/Upgrade the App-of-Apps chart ----
       - name: Install/Upgrade App-of-Apps (Helm)
         shell: bash
         run: |
@@ -637,7 +641,42 @@ jobs:
             --set global.releaseTag="${TAG}" \
             --wait
           helm -n "${ARGO_NS}" status argocd-apps || true
+
+      - name: Show Applications & Ingresses (debug)
+        shell: bash
+        run: |
+          set -euo pipefail
           kubectl -n "${ARGO_NS}" get applications.argoproj.io -o wide || true
+          echo "---- argocd ingress ----"
+          kubectl -n argocd get ingress || true
+          echo "---- web/back/monitoring ingresses ----"
+          kubectl -n mario-web get ingress || true
+          kubectl -n mario-backend get ingress || true
+          kubectl -n monitoring get ingress || true
+
+      - name: Wait for ArgoCD Ingress host to be admitted
+        shell: bash
+        run: |
+          set -euo pipefail
+          ATTEMPTS=30
+          until kubectl -n argocd get ingress 2>/dev/null | grep -q 'argo.mario.local'; do
+            ((ATTEMPTS--)) || { echo "ArgoCD ingress not found"; exit 1; }
+            echo "waiting for ArgoCD ingress…"
+            sleep 6
+          done
+          echo "ArgoCD ingress:"
+          kubectl -n argocd get ingress -o wide
+
+      - name: Optional curl smoke (best effort)
+        shell: bash
+        run: |
+          set +e
+          which curl >/dev/null 2>&1 || { echo "curl not found; skipping"; exit 0; }
+          echo "Testing hosts (HTTP -> expect 301/307 to HTTPS if configured by NGINX)…"
+          for h in web.mario.local api.mario.local argo.mario.local; do
+            echo "== $h =="
+            curl -I --max-time 5 -H "Host: $h" "http://$(minikube ip)" || true
+          done
 
   # ----------------------------------------------------------
   # Slack summaries (global + minikube-only) and sender
