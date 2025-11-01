@@ -1,9 +1,6 @@
-{{- /* Safe locals */ -}}
-{{- $db := (.Values.db | default (dict)) -}}
-{{- $dbSecrets := (get $db "secrets" | default (dict)) -}}
-{{- $credsName := ((get $dbSecrets "credsName") | default "db-secrets") -}}
-
-{{- if (get $db "enabled" | default false) }}
+{{- /* infra/helm/backend/templates/db-deploy.yaml */ -}}
+{{- $db := (.Values.db | default dict) -}}
+{{- if ($db.enabled | default false) }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -24,6 +21,7 @@ spec:
         fsGroup: 999
         fsGroupChangePolicy: OnRootMismatch
 
+      # Only fixes ownership on the mounted PVC
       initContainers:
         - name: fix-perms
           image: busybox:1.36
@@ -40,83 +38,25 @@ spec:
             - name: data
               mountPath: /var/lib/postgresql/data
 
-        # Option B: temp Postgres on localhost:5433 to create DB if missing
-        - name: ensure-db
-          image: {{ (get $db "image" | default "postgres:15") | quote }}
-          securityContext:
-            runAsNonRoot: true
-            runAsUser: 999
-          env:
-            - name: PGDATA
-              value: /var/lib/postgresql/data/pgdata
-            # defaults (overridden by Secret below if provided)
-            - name: POSTGRES_DB
-              value: mario
-            - name: POSTGRES_USER
-              value: mario
-            - name: POSTGRES_PASSWORD
-              value: mario123
-          envFrom:
-            - secretRef:
-                name: {{ $credsName }}
-          command: ["sh","-lc"]
-          args:
-            - |
-              set -euo pipefail
-              PORT=5433
-
-              echo "[ensure-db] Starting temporary postgres on 127.0.0.1:${PORT} ..."
-              pg_ctl -D "${PGDATA}" \
-                -o "-c listen_addresses='127.0.0.1' -p ${PORT}" \
-                -w start
-
-              export PGPASSWORD="${POSTGRES_PASSWORD}"
-
-              echo "[ensure-db] Waiting for server..."
-              for i in $(seq 1 30); do
-                if psql -h 127.0.0.1 -p "${PORT}" -U "${POSTGRES_USER}" -d postgres -v ON_ERROR_STOP=1 -c "SELECT 1;" >/dev/null 2>&1; then
-                  echo "[ensure-db] Server is ready."
-                  break
-                fi
-                echo "[ensure-db] not ready yet..."; sleep 1
-                if [ "$i" -eq 30 ]; then
-                  echo "[ensure-db] timeout waiting for postgres"; exit 1
-                fi
-              done
-
-              echo "[ensure-db] Ensure database ${POSTGRES_DB} exists..."
-              psql -h 127.0.0.1 -p "${PORT}" -U "${POSTGRES_USER}" -d postgres -v ON_ERROR_STOP=1 \
-                -c "DO $$ BEGIN
-                      IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '${POSTGRES_DB}') THEN
-                        EXECUTE format('CREATE DATABASE %I OWNER %I', '${POSTGRES_DB}', '${POSTGRES_USER}');
-                      END IF;
-                    END $$;"
-
-              echo "[ensure-db] Stopping temporary postgres..."
-              pg_ctl -D "${PGDATA}" -m fast -w stop
-          volumeMounts:
-            - name: data
-              mountPath: /var/lib/postgresql/data
-
       containers:
         - name: postgres
-          image: {{ (get $db "image" | default "postgres:15") | quote }}
+          image: {{ $db.image | default "postgres:15" | quote }}
           env:
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
           envFrom:
             - secretRef:
-                name: {{ $credsName }}
+                name: {{ (coalesce $db.secrets.credsName "db-secrets") | quote }}
           ports:
             - containerPort: 5432
           readinessProbe:
             exec:
-              command: ["sh","-lc","pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+              command: ["sh","-lc","pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-postgres}"]
             initialDelaySeconds: 5
             periodSeconds: 5
           livenessProbe:
             exec:
-              command: ["sh","-lc","pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+              command: ["sh","-lc","pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-postgres}"]
             initialDelaySeconds: 20
             periodSeconds: 10
           securityContext:
@@ -125,6 +65,38 @@ spec:
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
+
+          # Create user/db AFTER postgres is up (works even if PVC already has data)
+          lifecycle:
+            postStart:
+              exec:
+                command:
+                  - bash
+                  - -lc
+                  - |
+                    set -euo pipefail
+                    # Wait for server
+                    for i in {1..60}; do
+                      pg_isready -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-postgres}" && break
+                      sleep 2
+                    done
+
+                    create_if_missing () {
+                      local psql_u="$1"  # which role to connect as
+                      # Create role if absent
+                      psql -v ON_ERROR_STOP=1 -U "$psql_u" -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='${POSTGRES_USER}';" | grep -q 1 \
+                        || psql -v ON_ERROR_STOP=1 -U "$psql_u" -d postgres -c "CREATE USER ${POSTGRES_USER} WITH PASSWORD '${POSTGRES_PASSWORD}';"
+                      # Create DB if absent (owned by POSTGRES_USER)
+                      psql -v ON_ERROR_STOP=1 -U "$psql_u" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='${POSTGRES_DB}';" | grep -q 1 \
+                        || psql -v ON_ERROR_STOP=1 -U "$psql_u" -d postgres -c "CREATE DATABASE ${POSTGRES_DB} OWNER ${POSTGRES_USER};"
+                    }
+
+                    # Try with 'postgres' superuser first, then with POSTGRES_USER
+                    if psql -U postgres -d postgres -tAc "SELECT 1" >/dev/null 2>&1; then
+                      create_if_missing postgres
+                    else
+                      create_if_missing "${POSTGRES_USER:-postgres}"
+                    fi
 
       volumes:
         - name: data
