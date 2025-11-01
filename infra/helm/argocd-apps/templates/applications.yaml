@@ -1,6 +1,11 @@
-# applications.yaml
+# devops-project1/infra/helm/argocd-apps/templates/applications.yaml
 {{- /* ========= In-repo apps ========= */ -}}
 {{- range $app := (.Values.apps | default (list)) }}
+{{- /* prepare merged Helm values for this app */ -}}
+{{- $hv := (dig "helm" "values" dict $app) | default dict -}}
+{{- $av := ($app.values | default dict) -}}
+{{- $merged := merge (deepCopy $hv) $av -}}
+
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -17,17 +22,9 @@ spec:
     path: {{ $app.path }}
     helm:
       version: {{ default "v3" (dig "helm" "version" "v3" $app) | quote }}
-      {{- /* merge app.helm.values (lower priority) + app.values (higher priority) */ -}}
-      {{- $hv := (dig "helm" "values" dict $app) | default dict -}}
-      {{- $av := ($app.values | default dict) -}}
-      {{- $merged := merge (deepCopy $hv) $av -}}
-      valuesObject:
-        {{- toYaml $merged | nindent 8 }}
-  info:
-    - name: Release
-      value: {{ default "unknown" $.Values.global.releaseTag | quote }}
-    - name: Image
-      value: {{ $repo := (dig "image" "repository" "" $merged) }}{{ $tag := (dig "image" "tag" "" $merged) | default $.Values.global.releaseTag }}{{ if $repo }}{{ printf "%s:%s" $repo $tag | quote }}{{ else }}"unknown"{{ end }}
+      # Use a single string block to avoid YAML structure/indent pitfalls
+      values: |
+{{ toYaml $merged | nindent 8 }}
   syncPolicy:
     automated:
       prune: true
@@ -50,6 +47,8 @@ spec:
 
 {{- /* ========= External Helm charts ========= */ -}}
 {{- range $h := (.Values.helmApps | default (list)) }}
+{{- $hv := (dig "helm" "values" nil $h) -}}
+
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -65,21 +64,14 @@ spec:
     chart: {{ $h.source.chart }}
     targetRevision: {{ $h.source.targetRevision }}
     helm:
-      {{- $hv := (dig "helm" "values" nil $h) -}}
       {{- if $hv }}
-        {{- if kindIs "string" $hv }}
       values: |
+{{- if kindIs "string" $hv }}
 {{ $hv | nindent 8 }}
-        {{- else }}
-      valuesObject:
+{{- else }}
 {{ toYaml $hv | nindent 8 }}
-        {{- end }}
+{{- end }}
       {{- end }}
-  info:
-    - name: Chart
-      value: "{{ $h.source.chart }}@{{ $h.source.targetRevision }}"
-    - name: Release
-      value: {{ default "unknown" $.Values.global.releaseTag | quote }}
   syncPolicy:
     automated:
       prune: true
