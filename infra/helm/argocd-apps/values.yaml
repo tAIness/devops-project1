@@ -2,12 +2,10 @@ global:
   argoNamespace: argocd
   repoURL: https://github.com/tAIness/devops-project1.git
   targetRevision: main
-  releaseTag: "v1.0.205"
-
+  releaseTag: "v1.0.208"
 project:
   enabled: false
   name: default
-
 apps:
   - name: backend
     path: infra/helm/backend
@@ -20,7 +18,7 @@ apps:
       fullnameOverride: "app"
       image:
         repository: docker.io/itaef/supermario-service
-        tag: ""            # use .Chart.AppVersion
+        tag: "" # use .Chart.AppVersion
         pullPolicy: IfNotPresent
       service:
         port: 8000
@@ -44,9 +42,8 @@ apps:
         storage:
           size: 1Gi
           storageClassName: standard
-        service: { name: db, port: 5432 }
-        secrets: { credsName: db-secrets }
-
+        service: {name: db, port: 5432}
+        secrets: {credsName: db-secrets}
   - name: web
     path: infra/helm/web
     destinationNamespace: mario-web
@@ -57,11 +54,10 @@ apps:
     values:
       image:
         repository: docker.io/itaef/supermario-front
-        tag: ""            # use .Chart.AppVersion
+        tag: "" # use .Chart.AppVersion
       ingress:
         enabled: true
         host: web.mario.local
-
 helmApps:
   # --- Argo CD itself (install first) ---
   - name: argocd
@@ -88,7 +84,6 @@ helmApps:
         configs:
           params:
             server.insecure: true   # local/dev only
-
   # --- KEDA ---
   - name: keda
     destinationNamespace: keda
@@ -100,7 +95,6 @@ helmApps:
       targetRevision: 2.14.0
     helm:
       values: ""
-
   # --- Monitoring stack ---
   - name: monitoring
     destinationNamespace: monitoring
@@ -159,7 +153,6 @@ helmApps:
                   resources:
                     requests:
                       storage: 1Gi
-
 # Only real Secrets belong here
 secrets:
   - namespace: monitoring
