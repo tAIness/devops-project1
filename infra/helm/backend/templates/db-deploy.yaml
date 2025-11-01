@@ -1,5 +1,7 @@
 {{- /* infra/helm/backend/templates/db-deploy.yaml */ -}}
 {{- $db := (.Values.db | default dict) -}}
+{{- $dbSecrets := (get $db "secrets" | default dict) -}}
+{{- $credsName := (get $dbSecrets "credsName" | default "db-secrets") -}}
 {{- if ($db.enabled | default false) }}
 apiVersion: apps/v1
 kind: Deployment
@@ -21,7 +23,7 @@ spec:
         fsGroup: 999
         fsGroupChangePolicy: OnRootMismatch
 
-      # Only fixes ownership on the mounted PVC
+      # Only fix filesystem perms on the PVC
       initContainers:
         - name: fix-perms
           image: busybox:1.36
@@ -40,23 +42,23 @@ spec:
 
       containers:
         - name: postgres
-          image: {{ $db.image | default "postgres:15" | quote }}
+          image: {{ ($db.image | default "postgres:15") | quote }}
           env:
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
           envFrom:
             - secretRef:
-                name: {{ (coalesce $db.secrets.credsName "db-secrets") | quote }}
+                name: {{ $credsName | quote }}
           ports:
             - containerPort: 5432
           readinessProbe:
             exec:
-              command: ["sh","-lc","pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-postgres}"]
+              command: ["sh","-lc","pg_isready -U ${POSTGRES_USER:-postgres} -d template1"]
             initialDelaySeconds: 5
             periodSeconds: 5
           livenessProbe:
             exec:
-              command: ["sh","-lc","pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-postgres}"]
+              command: ["sh","-lc","pg_isready -U ${POSTGRES_USER:-postgres} -d template1"]
             initialDelaySeconds: 20
             periodSeconds: 10
           securityContext:
@@ -66,7 +68,7 @@ spec:
             - name: data
               mountPath: /var/lib/postgresql/data
 
-          # Create user/db AFTER postgres is up (works even if PVC already has data)
+          # Create role/db AFTER postgres is up, using template1 and a robust admin selection
           lifecycle:
             postStart:
               exec:
@@ -75,27 +77,55 @@ spec:
                   - -lc
                   - |
                     set -euo pipefail
-                    # Wait for server
+
+                    # Small helper: try a connection (user, db)
+                    try_conn() {
+                      local u="$1"; local d="$2"
+                      PGPASSWORD="${POSTGRES_PASSWORD:-}" psql -U "$u" -d "$d" -Atc "SELECT 1" >/dev/null 2>&1
+                    }
+
+                    # Wait until server socket is ready
                     for i in {1..60}; do
-                      pg_isready -U "${POSTGRES_USER:-postgres}" -d "${POSTGRES_DB:-postgres}" && break
+                      if try_conn "${POSTGRES_USER:-postgres}" "template1"; then
+                        ADMIN_USER="${POSTGRES_USER:-postgres}"
+                        break
+                      elif try_conn "postgres" "template1"; then
+                        ADMIN_USER="postgres"
+                        break
+                      fi
                       sleep 2
                     done
 
-                    create_if_missing () {
-                      local psql_u="$1"  # which role to connect as
-                      # Create role if absent
-                      psql -v ON_ERROR_STOP=1 -U "$psql_u" -d postgres -tAc "SELECT 1 FROM pg_roles WHERE rolname='${POSTGRES_USER}';" | grep -q 1 \
-                        || psql -v ON_ERROR_STOP=1 -U "$psql_u" -d postgres -c "CREATE USER ${POSTGRES_USER} WITH PASSWORD '${POSTGRES_PASSWORD}';"
-                      # Create DB if absent (owned by POSTGRES_USER)
-                      psql -v ON_ERROR_STOP=1 -U "$psql_u" -d postgres -tAc "SELECT 1 FROM pg_database WHERE datname='${POSTGRES_DB}';" | grep -q 1 \
-                        || psql -v ON_ERROR_STOP=1 -U "$psql_u" -d postgres -c "CREATE DATABASE ${POSTGRES_DB} OWNER ${POSTGRES_USER};"
-                    }
+                    if [ -z "${ADMIN_USER:-}" ]; then
+                      echo "Postgres not ready for admin connection" >&2
+                      exit 1
+                    fi
 
-                    # Try with 'postgres' superuser first, then with POSTGRES_USER
-                    if psql -U postgres -d postgres -tAc "SELECT 1" >/dev/null 2>&1; then
-                      create_if_missing postgres
+                    # Use template1 for admin ops (exists even if 'postgres' db was removed)
+                    TARGET_USER="${POSTGRES_USER:-mario}"
+                    TARGET_DB="${POSTGRES_DB:-mario}"
+                    TARGET_PASS="${POSTGRES_PASSWORD:-}"
+
+                    # Create role if missing (skip if admin is already that role)
+                    if [ "$ADMIN_USER" != "$TARGET_USER" ]; then
+                      if ! PGPASSWORD="${POSTGRES_PASSWORD:-}" psql -U "$ADMIN_USER" -d template1 -Atc \
+                           "SELECT 1 FROM pg_roles WHERE rolname='${TARGET_USER}'" | grep -q 1; then
+                        PGPASSWORD="${POSTGRES_PASSWORD:-}" psql -U "$ADMIN_USER" -d template1 -v ON_ERROR_STOP=1 -c \
+                          "CREATE USER ${TARGET_USER} WITH PASSWORD '${TARGET_PASS}';"
+                      fi
                     else
-                      create_if_missing "${POSTGRES_USER:-postgres}"
+                      # If admin == target, ensure password is set (idempotent)
+                      if [ -n "$TARGET_PASS" ]; then
+                        PGPASSWORD="${POSTGRES_PASSWORD:-}" psql -U "$ADMIN_USER" -d template1 -v ON_ERROR_STOP=1 -c \
+                          "ALTER USER ${TARGET_USER} WITH PASSWORD '${TARGET_PASS}';"
+                      fi
+                    fi
+
+                    # Create DB if missing, owned by TARGET_USER
+                    if ! PGPASSWORD="${POSTGRES_PASSWORD:-}" psql -U "$ADMIN_USER" -d template1 -Atc \
+                         "SELECT 1 FROM pg_database WHERE datname='${TARGET_DB}'" | grep -q 1; then
+                      PGPASSWORD="${POSTGRES_PASSWORD:-}" psql -U "$ADMIN_USER" -d template1 -v ON_ERROR_STOP=1 -c \
+                        "CREATE DATABASE ${TARGET_DB} OWNER ${TARGET_USER};"
                     fi
 
       volumes:
