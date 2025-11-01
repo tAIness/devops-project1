@@ -1,7 +1,9 @@
-{{- $db := (get .Values "db") | default (dict) -}}
-{{- if ((get $db "enabled") | default false) -}}
-{{- $dbSecrets := (get $db "secrets") | default (dict) -}}
-{{- $credsName := (get $dbSecrets "credsName") | default "db-secrets" -}}
+{{- /* Safe locals */ -}}
+{{- $db := (.Values.db | default (dict)) -}}
+{{- $dbSecrets := (get $db "secrets" | default (dict)) -}}
+{{- $credsName := ((get $dbSecrets "credsName") | default "db-secrets") -}}
+
+{{- if (get $db "enabled" | default false) }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -38,53 +40,59 @@ spec:
             - name: data
               mountPath: /var/lib/postgresql/data
 
-        # Option B: start a temporary Postgres to ensure role+DB exist
+        # Option B: temp Postgres on localhost:5433 to create DB if missing
         - name: ensure-db
-          image: {{ (get $db "image") | default "postgres:15" | quote }}
+          image: {{ (get $db "image" | default "postgres:15") | quote }}
           securityContext:
             runAsNonRoot: true
             runAsUser: 999
           env:
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
-            # bootstrap defaults (main container will use the Secret)
+            # defaults (overridden by Secret below if provided)
             - name: POSTGRES_DB
               value: mario
             - name: POSTGRES_USER
               value: mario
             - name: POSTGRES_PASSWORD
               value: mario123
+          envFrom:
+            - secretRef:
+                name: {{ $credsName }}
           command: ["sh","-lc"]
           args:
             - |
               set -euo pipefail
               PORT=5433
-              echo "[ensure-db] PGDATA=${PGDATA}"
-              mkdir -p /var/run/postgresql
 
-              echo "[ensure-db] starting temporary postgres on ${PORT}..."
-              pg_ctl -D "${PGDATA}" -o "-c listen_addresses='' -p ${PORT}" -w start
+              echo "[ensure-db] Starting temporary postgres on 127.0.0.1:${PORT} ..."
+              pg_ctl -D "${PGDATA}" \
+                -o "-c listen_addresses='127.0.0.1' -p ${PORT}" \
+                -w start
 
-              echo "[ensure-db] connection sanity..."
-              psql -p "${PORT}" -d postgres -v ON_ERROR_STOP=1 -c "SELECT 1;"
+              export PGPASSWORD="${POSTGRES_PASSWORD}"
 
-              echo "[ensure-db] ensure role ${POSTGRES_USER}..."
-              psql -p "${PORT}" -d postgres -v ON_ERROR_STOP=1 \
+              echo "[ensure-db] Waiting for server..."
+              for i in $(seq 1 30); do
+                if psql -h 127.0.0.1 -p "${PORT}" -U "${POSTGRES_USER}" -d postgres -v ON_ERROR_STOP=1 -c "SELECT 1;" >/dev/null 2>&1; then
+                  echo "[ensure-db] Server is ready."
+                  break
+                fi
+                echo "[ensure-db] not ready yet..."; sleep 1
+                if [ "$i" -eq 30 ]; then
+                  echo "[ensure-db] timeout waiting for postgres"; exit 1
+                fi
+              done
+
+              echo "[ensure-db] Ensure database ${POSTGRES_DB} exists..."
+              psql -h 127.0.0.1 -p "${PORT}" -U "${POSTGRES_USER}" -d postgres -v ON_ERROR_STOP=1 \
                 -c "DO $$ BEGIN
-                       IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${POSTGRES_USER}') THEN
-                         EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', '${POSTGRES_USER}', '${POSTGRES_PASSWORD}');
-                       END IF;
-                     END $$;"
+                      IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '${POSTGRES_DB}') THEN
+                        EXECUTE format('CREATE DATABASE %I OWNER %I', '${POSTGRES_DB}', '${POSTGRES_USER}');
+                      END IF;
+                    END $$;"
 
-              echo "[ensure-db] ensure database ${POSTGRES_DB}..."
-              psql -p "${PORT}" -d postgres -v ON_ERROR_STOP=1 \
-                -c "DO $$ BEGIN
-                       IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname='${POSTGRES_DB}') THEN
-                         EXECUTE format('CREATE DATABASE %I OWNER %I', '${POSTGRES_DB}', '${POSTGRES_USER}');
-                       END IF;
-                     END $$;"
-
-              echo "[ensure-db] stopping temporary postgres..."
+              echo "[ensure-db] Stopping temporary postgres..."
               pg_ctl -D "${PGDATA}" -m fast -w stop
           volumeMounts:
             - name: data
@@ -92,7 +100,7 @@ spec:
 
       containers:
         - name: postgres
-          image: {{ (get $db "image") | default "postgres:15" | quote }}
+          image: {{ (get $db "image" | default "postgres:15") | quote }}
           env:
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
@@ -103,12 +111,12 @@ spec:
             - containerPort: 5432
           readinessProbe:
             exec:
-              command: ["sh","-lc","pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+              command: ["sh","-lc","pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
             initialDelaySeconds: 5
             periodSeconds: 5
           livenessProbe:
             exec:
-              command: ["sh","-lc","pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+              command: ["sh","-lc","pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
             initialDelaySeconds: 20
             periodSeconds: 10
           securityContext:
