@@ -4,11 +4,10 @@ global:
   repoURL: https://github.com/tAIness/devops-project1.git
   targetRevision: main
   # (optional) your release flow can read this; not used directly by the backend chart
-  releaseTag: "v1.0.205"
+  releaseTag: "v1.0.207"
 project:
   enabled: false
   name: default
-
 apps:
   # ===================== backend =====================
   - name: backend
@@ -20,20 +19,16 @@ apps:
       version: v3
     values:
       fullnameOverride: "app"
-
       image:
         repository: docker.io/itaef/supermario-service
-        tag: ""                    # use .Chart.AppVersion
+        tag: "" # use .Chart.AppVersion
         pullPolicy: IfNotPresent
-
       service:
         port: 8000
-
       ingress:
         enabled: true
         host: api.mario.local
         useRegex: false
-
       # ---- Secrets for DB + app connection (rendered by backend chart) ----
       secrets:
         # credentials secret for Postgres (db-secrets)
@@ -47,7 +42,6 @@ apps:
         dbConnB64:
           # echo -n 'postgresql://mario:mario123@db:5432/mario' | base64
           url: cG9zdGdyZXNxbDovL21hcmlvOm1hcmlvMTIzQGRiOjU0MzIvbWFyaW8=
-
       db:
         enabled: true
         image: postgres:15
@@ -59,7 +53,6 @@ apps:
           port: 5432
         secrets:
           credsName: db-secrets
-
   # ===================== web =========================
   - name: web
     path: infra/helm/web
@@ -71,11 +64,10 @@ apps:
     values:
       image:
         repository: docker.io/itaef/supermario-front
-        tag: ""                    # use .Chart.AppVersion
+        tag: "" # use .Chart.AppVersion
       ingress:
         enabled: true
         host: web.mario.local
-
 # ===================== External Helm charts =====================
 helmApps:
   # KEDA (before workloads that might depend on it)
@@ -89,7 +81,6 @@ helmApps:
       targetRevision: 2.14.0
     helm:
       values: ""
-
   # Monitoring stack
   - name: monitoring
     destinationNamespace: monitoring
@@ -154,25 +145,22 @@ secrets:
     stringData:
       admin-user: admin
       admin-password: admin
-
   - name: argocd
-    destinationNamespace: {{ .Values.global.argoNamespace | default "argocd" }}
+    destinationNamespace: {? {.Values.global.argoNamespace | default "argocd": ''} : ''}
     annotations:
-      argocd.argoproj.io/sync-wave: "-20"     # ensure Argo CD comes up before other apps
+      argocd.argoproj.io/sync-wave: "-20" # ensure Argo CD comes up before other apps
     source:
       repoURL: https://argoproj.github.io/argo-helm
       chart: argo-cd
-      targetRevision: 6.7.12                  # pick a current 6.x you use
+      targetRevision: 6.7.12 # pick a current 6.x you use
     helm:
       values: |-
         global:
           domain: argo.mario.local
-
       server:
         service:
           # Keep this ClusterIP so it doesn't compete with minikube tunnel or NodePorts
           type: ClusterIP
-
           ingress:
             enabled: true
             ingressClassName: nginx
@@ -181,7 +169,6 @@ secrets:
             # tls:
             #   - secretName: argocd-tls
             #     hosts: [argo.mario.local]
-
         configs:
           params:
-            server.insecure: true    # only for local dev; remove in prod
+            server.insecure: true # only for local dev; remove in prod
