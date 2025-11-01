@@ -1,6 +1,7 @@
-# devops-project1/infra/helm/backend/templates/db-deploy.yaml
 {{- $db := (get .Values "db") | default (dict) -}}
-{{- if (get $db "enabled" | default false) }}
+{{- if ((get $db "enabled") | default false) -}}
+{{- $dbSecrets := (get $db "secrets") | default (dict) -}}
+{{- $credsName := (get $dbSecrets "credsName") | default "db-secrets" -}}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -22,7 +23,6 @@ spec:
         fsGroupChangePolicy: OnRootMismatch
 
       initContainers:
-        # 1) Ensure volume permissions are correct
         - name: fix-perms
           image: busybox:1.36
           securityContext:
@@ -30,7 +30,7 @@ spec:
           command: ["sh","-c"]
           args:
             - |
-              set -eu
+              set -eux
               mkdir -p /var/lib/postgresql/data /var/lib/postgresql/data/pgdata
               chown -R 999:999 /var/lib/postgresql/data
               chmod 700 /var/lib/postgresql/data/pgdata || true
@@ -38,95 +38,77 @@ spec:
             - name: data
               mountPath: /var/lib/postgresql/data
 
-        # 2) Start a temporary local postgres on the mounted PGDATA,
-        #    create role & DB if missing, then stop it.
+        # Option B: start a temporary Postgres to ensure role+DB exist
         - name: ensure-db
-          image: {{ .Values.db.image | default "postgres:15" | quote }}
+          image: {{ (get $db "image") | default "postgres:15" | quote }}
           securityContext:
-            runAsUser: 999
             runAsNonRoot: true
+            runAsUser: 999
           env:
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
-            # Defaults in case Secret is absent (won't overwrite Secret values)
+            # bootstrap defaults (main container will use the Secret)
             - name: POSTGRES_DB
-              value: "mario"
+              value: mario
             - name: POSTGRES_USER
-              value: "mario"
+              value: mario
             - name: POSTGRES_PASSWORD
-              value: "mario123"
-          envFrom:
-            - secretRef:
-                name: {{ default "db-secrets" .Values.db.secrets.credsName | quote }}
-                optional: true
-          command: ["bash","-lc"]
+              value: mario123
+          command: ["sh","-lc"]
           args:
             - |
               set -euo pipefail
-              ROLE="${POSTGRES_USER:-mario}"
-              PASS="${POSTGRES_PASSWORD:-mario123}"
-              DBNM="${POSTGRES_DB:-mario}"
-              SOCKDIR="/var/run/postgresql"
-              PORT="5433"
-
+              PORT=5433
               echo "[ensure-db] PGDATA=${PGDATA}"
-              mkdir -p "${SOCKDIR}"
+              mkdir -p /var/run/postgresql
 
-              # Start a temporary local-only server (no TCP listen)
-              echo "[ensure-db] Starting temporary postgres on port ${PORT} (local socket only)…"
-              pg_ctl -D "$PGDATA" -o "-c listen_addresses='' -p ${PORT}" -w start
+              echo "[ensure-db] starting temporary postgres on ${PORT}..."
+              pg_ctl -D "${PGDATA}" -o "-c listen_addresses='' -p ${PORT}" -w start
 
-              # Create role if missing
-              echo "[ensure-db] Ensuring role ${ROLE} exists…"
-              psql -p "${PORT}" -d postgres -v ON_ERROR_STOP=1 <<SQL
-DO \$\$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${ROLE}') THEN
-    EXECUTE format('CREATE ROLE %I WITH LOGIN PASSWORD %L', '${ROLE}', '${PASS}');
-  END IF;
-END
-\$\$;
-SQL
+              echo "[ensure-db] connection sanity..."
+              psql -p "${PORT}" -d postgres -v ON_ERROR_STOP=1 -c "SELECT 1;"
 
-              # Create DB if missing (owned by ROLE)
-              echo "[ensure-db] Ensuring database ${DBNM} exists…"
-              psql -p "${PORT}" -d postgres -v ON_ERROR_STOP=1 <<SQL
-DO \$\$
-BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '${DBNM}') THEN
-    EXECUTE format('CREATE DATABASE %I OWNER %I', '${DBNM}', '${ROLE}');
-  END IF;
-END
-\$\$;
-SQL
+              echo "[ensure-db] ensure role ${POSTGRES_USER}..."
+              psql -p "${PORT}" -d postgres -v ON_ERROR_STOP=1 \
+                -c "DO $$ BEGIN
+                       IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${POSTGRES_USER}') THEN
+                         EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', '${POSTGRES_USER}', '${POSTGRES_PASSWORD}');
+                       END IF;
+                     END $$;"
 
-              echo "[ensure-db] Stopping temporary postgres…"
-              pg_ctl -D "$PGDATA" -m fast -w stop
-              echo "[ensure-db] Done."
+              echo "[ensure-db] ensure database ${POSTGRES_DB}..."
+              psql -p "${PORT}" -d postgres -v ON_ERROR_STOP=1 \
+                -c "DO $$ BEGIN
+                       IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname='${POSTGRES_DB}') THEN
+                         EXECUTE format('CREATE DATABASE %I OWNER %I', '${POSTGRES_DB}', '${POSTGRES_USER}');
+                       END IF;
+                     END $$;"
 
+              echo "[ensure-db] stopping temporary postgres..."
+              pg_ctl -D "${PGDATA}" -m fast -w stop
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
 
       containers:
         - name: postgres
-          image: {{ .Values.db.image | default "postgres:15" | quote }}
+          image: {{ (get $db "image") | default "postgres:15" | quote }}
           env:
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
           envFrom:
             - secretRef:
-                name: {{ default "db-secrets" .Values.db.secrets.credsName | quote }}
+                name: {{ $credsName }}
           ports:
             - containerPort: 5432
           readinessProbe:
             exec:
-              command: ["sh","-lc","pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+              command: ["sh","-lc","pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
             initialDelaySeconds: 5
             periodSeconds: 5
           livenessProbe:
             exec:
-              command: ["sh","-lc","pg_isready -U $POSTGRES_USER -d $POSTGRES_DB"]
+              command: ["sh","-lc","pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
             initialDelaySeconds: 20
             periodSeconds: 10
           securityContext:
