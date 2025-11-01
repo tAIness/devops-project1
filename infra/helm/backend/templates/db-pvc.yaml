@@ -1,18 +1,23 @@
 # devops-project1/infra/helm/backend/templates/db-pvc.yaml
-{{- $db := (get .Values "db") | default (dict) -}}
-{{- if (get $db "enabled" | default false) }}
+{{- /* infra/helm/backend/templates/db-pvc.yaml */ -}}
+{{- $db := (.Values.db | default dict) -}}
+{{- if ($db.enabled | default false) }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: pg-data
   namespace: {{ .Release.Namespace }}
-  labels: { app: mario-db }
+  labels:
+    app: mario-db
 spec:
-  accessModes: ["ReadWriteOnce"]
+  accessModes:
+    - ReadWriteOnce
   resources:
     requests:
-      storage: {{ .Values.db.storage.size | default "1Gi" }}
-{{- if .Values.db.storageClassName }}
-  storageClassName: {{ .Values.db.storageClassName }}
+      storage: {{ (coalesce $db.storage.size "1Gi") | quote }}
+{{- $sc := (coalesce $db.storage.storageClassName "") -}}
+{{- if $sc }}
+  storageClassName: {{ $sc | quote }}
 {{- end }}
 {{- end }}
+
