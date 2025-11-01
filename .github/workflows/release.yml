@@ -597,6 +597,7 @@ jobs:
   # Deploy to local minikube with Argo CD (App-of-Apps)
   # ----------------------------------------------------------
   k8s-argocd-minikube:
+
     name: Minikube + Argo CD (App-of-Apps)
     runs-on: [ self-hosted, macOS ]
     needs: [ resolve-target, resolve-build-mode, prepare-minikube ]
