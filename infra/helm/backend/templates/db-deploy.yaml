@@ -22,12 +22,12 @@ spec:
         fsGroupChangePolicy: OnRootMismatch
 
       initContainers:
-        # 1) make sure the PVC is owned by the postgres UID/GID
+        # 1) Ensure volume permissions are correct
         - name: fix-perms
           image: busybox:1.36
           securityContext:
             runAsUser: 0
-          command: ["sh", "-c"]
+          command: ["sh","-c"]
           args:
             - |
               set -eu
@@ -38,8 +38,8 @@ spec:
             - name: data
               mountPath: /var/lib/postgresql/data
 
-        # 2) ensure roles & database exist inside the mounted cluster
-        #    MUST run as postgres UID (NOT root), or postgres --single will refuse to run.
+        # 2) Start a temporary local postgres on the mounted PGDATA,
+        #    create role & DB if missing, then stop it.
         - name: ensure-db
           image: {{ .Values.db.image | default "postgres:15" | quote }}
           securityContext:
@@ -48,48 +48,61 @@ spec:
           env:
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
+            # Defaults in case Secret is absent (won't overwrite Secret values)
+            - name: POSTGRES_DB
+              value: "mario"
+            - name: POSTGRES_USER
+              value: "mario"
+            - name: POSTGRES_PASSWORD
+              value: "mario123"
           envFrom:
             - secretRef:
                 name: {{ default "db-secrets" .Values.db.secrets.credsName | quote }}
-          command: ["sh", "-lc"]
+                optional: true
+          command: ["bash","-lc"]
           args:
             - |
-              set -eu
+              set -euo pipefail
               ROLE="${POSTGRES_USER:-mario}"
               PASS="${POSTGRES_PASSWORD:-mario123}"
               DBNM="${POSTGRES_DB:-mario}"
+              SOCKDIR="/var/run/postgresql"
+              PORT="5433"
 
-              echo "[ensure-db] Using PGDATA=$PGDATA ROLE=$ROLE DB=$DBNM"
+              echo "[ensure-db] PGDATA=${PGDATA}"
+              mkdir -p "${SOCKDIR}"
 
-              # create 'postgres' superuser if missing (some preseeded volumes lack it)
-              cat <<'SQL' | postgres --single -D "$PGDATA" postgres
-              DO $$
-              BEGIN
-                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'postgres') THEN
-                  CREATE ROLE postgres WITH SUPERUSER LOGIN;
-                END IF;
-              END $$;
-              SQL
+              # Start a temporary local-only server (no TCP listen)
+              echo "[ensure-db] Starting temporary postgres on port ${PORT} (local socket only)…"
+              pg_ctl -D "$PGDATA" -o "-c listen_addresses='' -p ${PORT}" -w start
 
-              # create app role if missing
-              cat <<SQL | postgres --single -D "$PGDATA" postgres
-              DO \$\$
-              BEGIN
-                IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${ROLE}') THEN
-                  EXECUTE format('CREATE ROLE %I WITH LOGIN PASSWORD %L', '${ROLE}', '${PASS}');
-                END IF;
-              END \$\$;
-              SQL
+              # Create role if missing
+              echo "[ensure-db] Ensuring role ${ROLE} exists…"
+              psql -p "${PORT}" -d postgres -v ON_ERROR_STOP=1 <<SQL
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${ROLE}') THEN
+    EXECUTE format('CREATE ROLE %I WITH LOGIN PASSWORD %L', '${ROLE}', '${PASS}');
+  END IF;
+END
+\$\$;
+SQL
 
-              # create app database if missing
-              cat <<SQL | postgres --single -D "$PGDATA" postgres
-              DO \$\$
-              BEGIN
-                IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '${DBNM}') THEN
-                  EXECUTE format('CREATE DATABASE %I OWNER %I', '${DBNM}', '${ROLE}');
-                END IF;
-              END \$\$;
-              SQL
+              # Create DB if missing (owned by ROLE)
+              echo "[ensure-db] Ensuring database ${DBNM} exists…"
+              psql -p "${PORT}" -d postgres -v ON_ERROR_STOP=1 <<SQL
+DO \$\$
+BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '${DBNM}') THEN
+    EXECUTE format('CREATE DATABASE %I OWNER %I', '${DBNM}', '${ROLE}');
+  END IF;
+END
+\$\$;
+SQL
+
+              echo "[ensure-db] Stopping temporary postgres…"
+              pg_ctl -D "$PGDATA" -m fast -w stop
+              echo "[ensure-db] Done."
 
           volumeMounts:
             - name: data
