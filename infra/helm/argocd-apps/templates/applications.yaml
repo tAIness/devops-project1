@@ -1,11 +1,8 @@
-# devops-project1/infra/helm/argocd-apps/templates/applications.yaml
 {{- /* ========= In-repo apps ========= */ -}}
 {{- range $app := (.Values.apps | default (list)) }}
-{{- /* prepare merged Helm values for this app */ -}}
 {{- $hv := (dig "helm" "values" dict $app) | default dict -}}
 {{- $av := ($app.values | default dict) -}}
 {{- $merged := merge (deepCopy $hv) $av -}}
-
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -22,17 +19,13 @@ spec:
     path: {{ $app.path }}
     helm:
       version: {{ default "v3" (dig "helm" "version" "v3" $app) | quote }}
-      # Use a single string block to avoid YAML structure/indent pitfalls
       values: |
 {{ toYaml $merged | nindent 8 }}
   syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
+    automated: { prune: true, selfHeal: true }
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true
-      # - Replace=true   # keep disabled to avoid immutable PVC issues
   ignoreDifferences:
     - group: ""
       kind: PersistentVolumeClaim
@@ -48,7 +41,6 @@ spec:
 {{- /* ========= External Helm charts ========= */ -}}
 {{- range $h := (.Values.helmApps | default (list)) }}
 {{- $hv := (dig "helm" "values" nil $h) -}}
-
 apiVersion: argoproj.io/v1alpha1
 kind: Application
 metadata:
@@ -73,9 +65,7 @@ spec:
 {{- end }}
       {{- end }}
   syncPolicy:
-    automated:
-      prune: true
-      selfHeal: true
+    automated: { prune: true, selfHeal: true }
     syncOptions:
       - CreateNamespace=true
       - ServerSideApply=true

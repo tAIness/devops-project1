@@ -1,17 +1,16 @@
-{{- if .Values.project.enabled }}
+{{- if (.Values.project.enabled | default false) }}
 apiVersion: argoproj.io/v1alpha1
 kind: AppProject
 metadata:
   name: {{ .Values.project.name | default "default" }}
-  namespace: {{ .Values.global.destinationNamespace | default "argocd" }}
+  namespace: {{ .Values.global.argoNamespace | default "argocd" }}
 spec:
-  description: {{ .Values.project.description | default "" | quote }}
+  description: "Local project"
+  sourceRepos: ["*"]
   destinations:
-{{- toYaml (default (list (dict "namespace" "*" "server" "https://kubernetes.default.svc")) .Values.project.destinations) | nindent 4 }}
-  sourceRepos:
-{{- toYaml (default (list "*") .Values.project.sourceRepos) | nindent 4 }}
+    - namespace: "*"
+      server: https://kubernetes.default.svc
   clusterResourceWhitelist:
-{{- toYaml (default (list (dict "group" "*" "kind" "*")) .Values.project.clusterResourceWhitelist) | nindent 4 }}
-  namespaceResourceBlacklist:
-{{- toYaml (default (list) .Values.project.namespaceResourceBlacklist) | nindent 4 }}
+    - group: '*'
+      kind: '*'
 {{- end }}

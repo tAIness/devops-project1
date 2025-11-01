@@ -1,21 +1,11 @@
-{{- /* Collect unique namespaces from apps, helmApps, and secrets */ -}}
-{{- $ns := dict -}}
-{{- range .Values.apps }}
-  {{- $_ := set $ns .destinationNamespace true -}}
-{{- end }}
-{{- range .Values.helmApps }}
-  {{- $_ := set $ns .destinationNamespace true -}}
-{{- end }}
-{{- range .Values.secrets }}
-  {{- $_ := set $ns .namespace true -}}
-{{- end }}
-
-{{- range $name, $_ := $ns }}
+{{- /* Create namespaces if you want the chart to own them */ -}}
+{{- $ns := list "mario-backend" "mario-web" "monitoring" -}}
+{{- range $n := $ns }}
 apiVersion: v1
 kind: Namespace
 metadata:
-  name: {{ $name }}
-  annotations:
-    argocd.argoproj.io/sync-wave: "-2"
+  name: {{ $n }}
+  labels:
+    app.kubernetes.io/managed-by: Helm
 ---
 {{- end }}
