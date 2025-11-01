@@ -1,0 +1,27 @@
+# devops-project1/infra/helm/argocd-apps/templates/argo-ingress.yaml
+{{- if .Values.argo.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: argo
+  namespace: {{ default "argocd" .Values.global.argoNamespace }}
+  annotations:
+    kubernetes.io/ingress.class: {{ default "nginx" .Values.argo.ingress.ingressClassName }}
+spec:
+  {{- if .Values.argo.ingress.tls.enabled }}
+  tls:
+    - hosts: [{{ .Values.argo.ingress.host | quote }}]
+      secretName: {{ .Values.argo.ingress.tls.secretName | quote }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.argo.ingress.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: argocd-server
+                port:
+                  number: 80
+{{- end }}
