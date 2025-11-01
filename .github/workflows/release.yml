@@ -585,13 +585,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-         IP="$(minikube ip || echo 127.0.0.1)"
-         HOSTS=(web.mario.local api.mario.local grafana.mario.local prometheus.mario.local alertmanager.mario.local argo.mario.local)
-         for h in "${HOSTS[@]}"; do
-          if ! grep -qE "[[:space:]]$h(\$|[[:space:]])" /etc/hosts; then
-            echo "$IP $h" | sudo tee -a /etc/hosts >/dev/null || true
-          fi
-         done
+          IP="$(minikube ip || echo 127.0.0.1)"
+          HOSTS=(web.mario.local api.mario.local grafana.mario.local prometheus.mario.local alertmanager.mario.local argo.mario.local)
+          for h in "${HOSTS[@]}"; do
+            if ! grep -qE "[[:space:]]${h}($|[[:space:]])" /etc/hosts; then
+              echo "${IP} ${h}" | sudo tee -a /etc/hosts >/dev/null || true
+            fi
+          done
 
   # ----------------------------------------------------------
   # Deploy to local minikube with Argo CD (App-of-Apps)
