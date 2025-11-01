@@ -4,7 +4,7 @@ global:
   repoURL: https://github.com/tAIness/devops-project1.git
   targetRevision: main
   # (optional) your release flow can read this; not used directly by the backend chart
-  releaseTag: "v1.0.198"
+  releaseTag: "v1.0.199"
 project:
   enabled: false
   name: default
