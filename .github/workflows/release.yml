@@ -583,16 +583,36 @@ jobs:
 
       - name: Add /etc/hosts for test domains (best effort)
         shell: bash
+        env:
+          SUDO_PASSWORD: ${{ secrets.SUDO_PASSWORD }}
         run: |
           set -euo pipefail
           IP="$(minikube ip || echo 127.0.0.1)"
           HOSTS=(web.mario.local api.mario.local grafana.mario.local prometheus.mario.local alertmanager.mario.local argo.mario.local)
-          for h in "${HOSTS[@]}"; do
-            if ! grep -qE "[[:space:]]${h}($|[[:space:]])" /etc/hosts; then
-              echo "${IP} ${h}" | sudo tee -a /etc/hosts >/dev/null || true
+
+          add_line() {
+            local line="$1"
+            if ! grep -qF -- "$line" /etc/hosts; then
+              if sudo -n true 2>/dev/null; then
+                echo "$line" | sudo tee -a /etc/hosts >/dev/null
+              elif [[ -n "${SUDO_PASSWORD:-}" ]]; then
+                printf '%s\n' "$SUDO_PASSWORD" | sudo -S tee -a /etc/hosts >/dev/null <<<"$line"
+              else
+                echo "::warning::No passwordless sudo and no SUDO_PASSWORD secret; could not update /etc/hosts."
+                echo "$line" >> hosts.additions
+              fi
             fi
+          }
+
+          for h in "${HOSTS[@]}"; do
+            add_line "$IP $h"
           done
 
+          if [[ -f hosts.additions ]]; then
+            echo "Manual additions required; run locally:"
+            cat hosts.additions
+          fi
+  
   # ----------------------------------------------------------
   # Deploy to local minikube with Argo CD (App-of-Apps)
   # ----------------------------------------------------------
