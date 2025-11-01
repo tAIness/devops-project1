@@ -3,8 +3,8 @@ global:
   argoNamespace: argocd
   repoURL: https://github.com/tAIness/devops-project1.git
   targetRevision: main
+  # (optional) your release flow can read this; not used directly by the backend chart
   releaseTag: "v1.0.205"
-
 project:
   enabled: false
   name: default
@@ -148,24 +148,31 @@ helmApps:
                   resources:
                     requests:
                       storage: 1Gi
+secrets:
+  - namespace: monitoring
+    name: grafana-admin
+    stringData:
+      admin-user: admin
+      admin-password: admin
 
-  # Argo CD itself, exposed via the same nginx Ingress
   - name: argocd
     destinationNamespace: {{ .Values.global.argoNamespace | default "argocd" }}
     annotations:
-      argocd.argoproj.io/sync-wave: "-20"
+      argocd.argoproj.io/sync-wave: "-20"     # ensure Argo CD comes up before other apps
     source:
       repoURL: https://argoproj.github.io/argo-helm
       chart: argo-cd
-      targetRevision: 6.7.12
+      targetRevision: 6.7.12                  # pick a current 6.x you use
     helm:
       values: |-
         global:
           domain: argo.mario.local
 
-        server:
-          service:
-            type: ClusterIP        # keep internal; access via ingress
+      server:
+        service:
+          # Keep this ClusterIP so it doesn't compete with minikube tunnel or NodePorts
+          type: ClusterIP
+
           ingress:
             enabled: true
             ingressClassName: nginx
@@ -174,14 +181,7 @@ helmApps:
             # tls:
             #   - secretName: argocd-tls
             #     hosts: [argo.mario.local]
-          configs:
-            params:
-              server.insecure: true # dev only
 
-# ===================== Pre-created Secrets =====================
-secrets:
-  - namespace: monitoring
-    name: grafana-admin
-    stringData:
-      admin-user: admin
-      admin-password: admin
+        configs:
+          params:
+            server.insecure: true    # only for local dev; remove in prod
