@@ -1,3 +1,4 @@
+# devops-project1/infra/helm/argocd-apps/values.yaml
 global:
   argoNamespace: argocd
   repoURL: https://github.com/tAIness/devops-project1.git
@@ -74,20 +75,26 @@ helmApps:
       targetRevision: 6.7.12
     helm:
       values: |-
+        fullnameOverride: argocd   # ensures names like argocd-server, argocd-repo-server, etc.
+
         global:
           domain: argo.mario.local
 
         server:
           service:
-            type: ClusterIP   # don’t grab 80/443 locally
+            type: ClusterIP        # do NOT expose on node ports / LB
           ingress:
             enabled: true
             ingressClassName: nginx
             hosts:
               - argo.mario.local
+            # tls:
+            #   - secretName: argocd-tls
+            #     hosts: [argo.mario.local]
+
         configs:
           params:
-            server.insecure: true   # local/dev only
+            server.insecure: true  # dev only; remove for prod
 
   # --- KEDA ---
   - name: keda

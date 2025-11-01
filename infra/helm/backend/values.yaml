@@ -1,3 +1,4 @@
+# devops-project1/infra/helm/backend/values.yaml
 image:
   repository: docker.io/itaef/supermario-service
   tag: ""                    # ← empty means “use .Chart.AppVersion”

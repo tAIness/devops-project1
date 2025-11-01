@@ -1,3 +1,4 @@
+# devops-project1/infra/helm/backend/templates/db-deploy.yaml
 {{- /* infra/helm/backend/templates/db-deploy.yaml */ -}}
 {{- $db := (.Values.db | default dict) -}}
 {{- $dbSecrets := (get $db "secrets" | default dict) -}}
