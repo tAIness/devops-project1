@@ -22,7 +22,7 @@ spec:
         fsGroupChangePolicy: OnRootMismatch
 
       initContainers:
-        # 1) fix PVC permissions so Postgres can own the data dir
+        # 1) make sure the PVC is owned by the postgres UID/GID
         - name: fix-perms
           image: busybox:1.36
           securityContext:
@@ -38,12 +38,13 @@ spec:
             - name: data
               mountPath: /var/lib/postgresql/data
 
-        # 2) ensure the superuser, role and database exist on this PVC
-        #    (runs BEFORE postgres starts; safe & idempotent)
+        # 2) ensure roles & database exist inside the mounted cluster
+        #    MUST run as postgres UID (NOT root), or postgres --single will refuse to run.
         - name: ensure-db
           image: {{ .Values.db.image | default "postgres:15" | quote }}
           securityContext:
-            runAsUser: 0
+            runAsUser: 999
+            runAsNonRoot: true
           env:
             - name: PGDATA
               value: /var/lib/postgresql/data/pgdata
@@ -54,15 +55,15 @@ spec:
           args:
             - |
               set -eu
-
-              # defaults if secret keys are absent (keeps the job idempotent)
               ROLE="${POSTGRES_USER:-mario}"
               PASS="${POSTGRES_PASSWORD:-mario123}"
               DBNM="${POSTGRES_DB:-mario}"
 
-              # make sure 'postgres' superuser exists (some volumes are pre-seeded without it)
-              cat <<'SQL' | postgres --single -D "$PGDATA" postgres >/dev/null
-              DO $$ 
+              echo "[ensure-db] Using PGDATA=$PGDATA ROLE=$ROLE DB=$DBNM"
+
+              # create 'postgres' superuser if missing (some preseeded volumes lack it)
+              cat <<'SQL' | postgres --single -D "$PGDATA" postgres
+              DO $$
               BEGIN
                 IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'postgres') THEN
                   CREATE ROLE postgres WITH SUPERUSER LOGIN;
@@ -71,8 +72,8 @@ spec:
               SQL
 
               # create app role if missing
-              cat <<SQL | postgres --single -D "$PGDATA" postgres >/dev/null
-              DO \$\$ 
+              cat <<SQL | postgres --single -D "$PGDATA" postgres
+              DO \$\$
               BEGIN
                 IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '${ROLE}') THEN
                   EXECUTE format('CREATE ROLE %I WITH LOGIN PASSWORD %L', '${ROLE}', '${PASS}');
@@ -81,7 +82,7 @@ spec:
               SQL
 
               # create app database if missing
-              cat <<SQL | postgres --single -D "$PGDATA" postgres >/dev/null
+              cat <<SQL | postgres --single -D "$PGDATA" postgres
               DO \$\$
               BEGIN
                 IF NOT EXISTS (SELECT 1 FROM pg_database WHERE datname = '${DBNM}') THEN
@@ -89,6 +90,7 @@ spec:
                 END IF;
               END \$\$;
               SQL
+
           volumeMounts:
             - name: data
               mountPath: /var/lib/postgresql/data
