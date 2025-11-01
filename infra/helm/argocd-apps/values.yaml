@@ -3,7 +3,7 @@ global:
   argoNamespace: argocd
   repoURL: https://github.com/tAIness/devops-project1.git
   targetRevision: main
-  releaseTag: "v1.0.209"
+  releaseTag: "v1.0.210"
 project:
   enabled: false
   name: default
@@ -64,28 +64,13 @@ helmApps:
   - name: argocd
     destinationNamespace: argocd
     annotations:
-       argocd.argoproj.io/sync-wave: "-20"
+      argocd.argoproj.io/sync-wave: "-20"
     source:
       repoURL: https://argoproj.github.io/argo-helm
       chart: argo-cd
       targetRevision: 6.7.12
     helm:
-      values: |-
-        global:
-          domain: argo.mario.local
-          
-        server:
-          service:
-            type: ClusterIP
-          ingress:
-            enabled: true
-            ingressClassName: nginx
-            hosts:
-              - argo.mario.local
-        configs:
-          params:
-            server.insecure: true
-
+      values: "global:\n  domain: argo.mario.local\n  \nserver:\n  service:\n    type: ClusterIP\n  ingress:\n    enabled: true\n    ingressClassName: nginx\n    hosts:\n      - argo.mario.local\nconfigs:\n  params:\n    server.insecure: true"
   # --- KEDA ---
   - name: keda
     destinationNamespace: keda
