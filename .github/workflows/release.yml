@@ -558,6 +558,21 @@ jobs:
           kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s || \
           kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller-admission --timeout=180s || true
 
+      - name: Preflight cleanup — remove non-Helm Argo CD Ingress
+        shell: bash
+        env:
+          ARGO_NS: argocd
+        run: |
+          set -euo pipefail
+          # Ensure namespace exists (idempotent)
+          kubectl get ns "${ARGO_NS}" >/dev/null 2>&1 || kubectl create ns "${ARGO_NS}"
+
+          # Delete the stray Ingress so Helm can create/own it
+          kubectl -n "${ARGO_NS}" delete ingress argocd-server --ignore-not-found
+
+          # (optional but harmless) make sure the Service is ClusterIP; Helm will manage it
+          kubectl -n "${ARGO_NS}" patch svc argocd-server --type=merge -p '{"spec":{"type":"ClusterIP"}}' || true
+       
       - name: Install/Upgrade Argo CD (Helm, pinned)
         shell: bash
         env:
