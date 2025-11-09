@@ -572,7 +572,7 @@ jobs:
 
           # (optional but harmless) make sure the Service is ClusterIP; Helm will manage it
           kubectl -n "${ARGO_NS}" patch svc argocd-server --type=merge -p '{"spec":{"type":"ClusterIP"}}' || true
-       
+
       - name: Install/Upgrade Argo CD (Helm, pinned)
         shell: bash
         env:
@@ -581,36 +581,48 @@ jobs:
           set -euo pipefail
           helm repo add argo https://argoproj.github.io/argo-helm
           helm repo update
-          # The version that worked in your manual fix
+          # Install chart but DO NOT create Ingress yet
           helm upgrade --install argocd argo/argo-cd \
             --version 6.7.12 \
             -n "${ARGO_NS}" --create-namespace \
             -f infra/helm/argocd/values-2-11.yaml \
+            --set server.ingress.enabled=false \
+            --set server.service.type=ClusterIP \
             --wait
-
+            
           kubectl -n "${ARGO_NS}" rollout status deploy/argocd-repo-server --timeout=180s
           kubectl -n "${ARGO_NS}" rollout status deploy/argocd-server      --timeout=180s
           kubectl -n "${ARGO_NS}" rollout status statefulset/argocd-application-controller --timeout=180s || \
-          kubectl -n "${ARGO_NS}" rollout status deploy/argocd-application-controller      --timeout=180s || true
-      
+          kubectl -n "${ARGO_NS}" rollout status deploy/argocd-application-controller
+          
+          
+      - name: Wait for NGINX admission webhook endpoints
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Wait for the admission deployment
+          kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller-admission --timeout=180s || true
+
+          # Wait until the Service has at least one ready endpoint
+          ATTEMPTS=40
+          until kubectl -n ingress-nginx get endpoints ingress-nginx-controller-admission \
+                -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null | grep -qE '.'; do
+            ((ATTEMPTS--)) || { echo "Admission webhook endpoints not ready"; kubectl -n ingress-nginx get all -o wide; exit 1; }
+            echo "Waiting for admission webhook endpoints…"
+            sleep 5
+          done
+          echo "Admission webhook is ready."
 
       - name: Enforce repo-server Service selector & Ingress
         shell: bash
         run: |
           set -euo pipefail
-          # Apply our overrides
           kubectl apply -f infra/overrides/argocd-repo-server-svc.yaml
-          kubectl apply -f infra/overrides/argo-ingress.yaml || true
-
-          # Remove the stray selector key if any prior manager injected it
+          kubectl apply -f infra/overrides/argo-ingress.yaml   # now safe; webhook is ready
           kubectl -n argocd patch svc argocd-repo-server --type='json' -p='[
             {"op":"remove","path":"/spec/selector/app.kubernetes.io~1instance"}
           ]' || true
-
-          # Clear stale endpoints so EndpointSlice repopulates immediately
           kubectl -n argocd delete endpoints argocd-repo-server --ignore-not-found || true
-
-          # Wait for EndpointSlice to have addresses
           for i in {1..30}; do
             ES="$(kubectl -n argocd get endpointslice -l kubernetes.io/service-name=argocd-repo-server -o json || true)"
             if echo "$ES" | grep -q '"addresses":\s*\['; then
@@ -620,8 +632,6 @@ jobs:
             echo "Waiting for EndpointSlice… ($i/30)"
             sleep 2
           done
-
-          echo "Selector now:"
           kubectl -n argocd get svc argocd-repo-server -o jsonpath='{.spec.selector}{"\n"}'    
 
   # ----------------------------------------------------------
