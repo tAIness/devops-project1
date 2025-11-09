@@ -1,0 +1,39 @@
+# Argo CD 2.11.x (chart 6.7.12) minimal, stable config
+installCRDs: true
+
+global:
+  image:
+    repository: quay.io/argoproj/argocd
+    tag: v2.11.7
+
+server:
+  service:
+    type: ClusterIP
+  ingress:
+    enabled: true
+    hosts:
+      - argo.mario.local
+    paths:
+      - /
+    https: false
+    # If you want SSL-termination at ingress set server.insecure=true (next key)
+  extraArgs:
+    - --insecure
+
+repoServer:
+  service:
+    enabled: true
+    ports:
+      server: 8081
+      metrics: 8084
+  # DO NOT set custom listen addresses here; defaults are correct.
+
+controller:
+  metrics:
+    enabled: true
+
+# Don’t override cmd-params unless you really need to.
+configs:
+  params:
+    server.insecure: "true"
+
