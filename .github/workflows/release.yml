@@ -613,16 +613,53 @@ jobs:
           done
           echo "Admission webhook is ready."
 
-      - name: Enforce repo-server Service selector & Ingress
+      - name: Enforce repo-server Service selector & Ingress (no duplicates)
         shell: bash
         run: |
           set -euo pipefail
+
+          # 0) Make sure the chart itself won't recreate an Ingress later
+          #    (keep this in your Helm step too: --set server.ingress.enabled=false)
+          : # noop
+
+          # 1) Apply/ensure the repo-server Service (safe)
           kubectl apply -f infra/overrides/argocd-repo-server-svc.yaml
-          kubectl apply -f infra/overrides/argo-ingress.yaml   # now safe; webhook is ready
+
+          # 2) If an old Argo CD ingress exists for the same host, delete it first
+          kubectl -n argocd delete ingress argocd-server --ignore-not-found
+
+          # 3) Extra safety: delete ANY ingress in argocd namespace that matches our host
+          HOST=argo.mario.local
+          # Try without jq using a simple grep on yaml (best-effort)
+          for i in $(kubectl -n argocd get ingress -o name | sed 's#ingress.networking.k8s.io/##'); do
+            if kubectl -n argocd get ingress "$i" -o yaml | grep -q "host: ${HOST}"; then
+              echo "Deleting duplicate ingress: $i"
+              kubectl -n argocd delete ingress "$i" --ignore-not-found
+            fi
+          done
+
+          # 4) Wait until NO ingress is left serving that host
+          for n in {1..30}; do
+            if kubectl -n argocd get ingress -o yaml 2>/dev/null | grep -q "host: ${HOST}"; then
+              echo "Waiting for old ingress for ${HOST} to disappear… ($n/30)"
+              sleep 3
+            else
+              break
+            fi
+          done
+
+          # 5) Now safely apply our ingress
+          kubectl apply -f infra/overrides/argo-ingress.yaml
+
+          # 6) Clean the stray selector key if present (idempotent)
           kubectl -n argocd patch svc argocd-repo-server --type='json' -p='[
             {"op":"remove","path":"/spec/selector/app.kubernetes.io~1instance"}
           ]' || true
+
+          # 7) Reset endpoints so EndpointSlice repopulates immediately (optional)
           kubectl -n argocd delete endpoints argocd-repo-server --ignore-not-found || true
+
+          # 8) Wait for EndpointSlice to have addresses
           for i in {1..30}; do
             ES="$(kubectl -n argocd get endpointslice -l kubernetes.io/service-name=argocd-repo-server -o json || true)"
             if echo "$ES" | grep -q '"addresses":\s*\['; then
@@ -632,7 +669,10 @@ jobs:
             echo "Waiting for EndpointSlice… ($i/30)"
             sleep 2
           done
-          kubectl -n argocd get svc argocd-repo-server -o jsonpath='{.spec.selector}{"\n"}'    
+
+          # 9) Show final selector
+          kubectl -n argocd get svc argocd-repo-server -o jsonpath='{.spec.selector}{"\n"}'
+  
 
   # ----------------------------------------------------------
   # Deploy to local minikube with Argo CD (App-of-Apps)
