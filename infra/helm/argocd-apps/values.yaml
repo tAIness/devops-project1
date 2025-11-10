@@ -62,7 +62,7 @@ apps:
 helmApps:
   # --- Argo CD itself (install first) ---
   - name: argocd
-    enabled: false
+    enabled: true
     manageWithHelm: false
     destinationNamespace: argocd
     annotations:
@@ -72,7 +72,7 @@ helmApps:
       chart: argo-cd
       targetRevision: 6.7.12
     helm:
-      values: "global:\n  domain: argo.mario.local\n  \nserver:\n  service:\n    type: ClusterIP\n  ingress:\n    enabled: true\n    ingressClassName: nginx\n    hosts:\n      - argo.mario.local\nconfigs:\n  params:\n    server.insecure: true"
+      values: "global:\n  domain: argo.mario.local\n  \nserver:\n  service:\n    type: ClusterIP\n  ingress:\n    enabled: false\n    ingressClassName: nginx\n    hosts:\n      - argo.mario.local\nconfigs:\n  params:\n    server.insecure: true"
   # --- KEDA ---
   - name: keda
     destinationNamespace: keda
