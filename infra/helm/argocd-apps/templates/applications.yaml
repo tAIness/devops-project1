@@ -1,7 +1,7 @@
-{{- /* ========= In-repo apps ========= */ -}}
+{{/* ========= In-repo apps ========= */}}
 {{- range $app := (.Values.apps | default (list)) }}
-{{- $appEnabled := (default true $app.enabled) -}}
-{{- if $appEnabled }}
+{{- $isEnabled := (hasKey $app "enabled") | ternary ($app.enabled) (true) -}}
+{{- if $isEnabled }}
 {{- $hv := (dig "helm" "values" dict $app) | default dict -}}
 {{- $av := ($app.values | default dict) -}}
 {{- $merged := merge (deepCopy $hv) $av -}}
@@ -39,9 +39,12 @@ spec:
         - /spec/dataSourceRef
 ---
 {{- end }}
+{{- end }}
 
-{{- /* ========= External Helm charts ========= */ -}}
+{{/* ========= External Helm charts ========= */}}
 {{- range $h := (.Values.helmApps | default (list)) }}
+{{- $isEnabled := (hasKey $h "enabled") | ternary ($h.enabled) (true) -}}
+{{- if $isEnabled }}
 {{- $hv := (dig "helm" "values" nil $h) -}}
 apiVersion: argoproj.io/v1alpha1
 kind: Application
@@ -72,4 +75,5 @@ spec:
       - CreateNamespace=true
       - ServerSideApply=true
 ---
+{{- end }}
 {{- end }}
