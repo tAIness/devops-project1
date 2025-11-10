@@ -1,5 +1,7 @@
 {{- /* ========= In-repo apps ========= */ -}}
 {{- range $app := (.Values.apps | default (list)) }}
+{{- $appEnabled := (default true $app.enabled) -}}
+{{- if $appEnabled }}
 {{- $hv := (dig "helm" "values" dict $app) | default dict -}}
 {{- $av := ($app.values | default dict) -}}
 {{- $merged := merge (deepCopy $hv) $av -}}

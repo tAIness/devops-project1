@@ -62,6 +62,7 @@ apps:
 helmApps:
   # --- Argo CD itself (install first) ---
   - name: argocd
+    enabled: false
     manageWithHelm: false
     destinationNamespace: argocd
     annotations:
