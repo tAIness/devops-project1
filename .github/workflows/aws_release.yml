@@ -320,6 +320,9 @@ jobs:
     if: ${{ needs.resolve-target.outputs.target == 'mac' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
     env:
       TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
+      AWS_ECR_REGISTRY: ${{ vars.AWS_ECR_REGISTRY }}
+      AWS_ECR_REPO_APP: ${{ vars.AWS_ECR_REPO_APP }}
+      AWS_ECR_REPO_WEB: ${{ vars.AWS_ECR_REPO_WEB }}
       DB_NAME: ${{ vars.DB_NAME }}
       DB_USER: ${{ vars.DB_USER }}
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
@@ -329,21 +332,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Configure AWS credentials (OIDC role) for Mac deploy
+      - name: Configure AWS credentials (OIDC role)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Write .env.local for compose
+      - name: Login to Amazon ECR
+        run: |
+          aws ecr get-login-password --region "${AWS_REGION}" \
+            | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
+
+      - name: Write .env.local for compose (ECR images)
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p mac-release-flow
           cat > mac-release-flow/.env.local <<EOF
-          AWS_ECR_REGISTRY=${AWS_ECR_REGISTRY}
-          AWS_ECR_REPO_APP=${AWS_ECR_REPO_APP}
-          AWS_ECR_REPO_WEB=${AWS_ECR_REPO_WEB}
+          DOCKERHUB_REPO_APP=${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_APP}
+          DOCKERHUB_REPO_WEB=${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_WEB}
           TAG=${TAG}
           WEB_PORT=${WEB_PORT}
           DB_NAME=${DB_NAME}
@@ -352,21 +359,19 @@ jobs:
           DB_PORT=${DB_PORT}
           FLASK_PORT=${FLASK_PORT}
           EOF
-          sed -n '1,12p' mac-release-flow/.env.local
+          echo "===== .env.local ====="
+          sed -n '1,10p' mac-release-flow/.env.local
 
-      - name: Login to Amazon ECR (pull)
-        run: |
-          aws ecr get-login-password --region "${AWS_REGION}" \
-            | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
-
-      - name: Ensure volume & pre-pull images (best effort)
+      - name: Ensure volume & pre-pull images (from ECR)
         shell: bash
         run: |
           set -euo pipefail
           docker volume create supermario_db_data >/dev/null
-          APP_REPO="${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_APP}"
-          WEB_REPO="${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_WEB}"
+          APP_REPO="$(grep '^DOCKERHUB_REPO_APP=' mac-release-flow/.env.local | cut -d= -f2)"
+          WEB_REPO="$(grep '^DOCKERHUB_REPO_WEB=' mac-release-flow/.env.local | cut -d= -f2)"
+          echo "Pre-pulling \$APP_REPO:${TAG}"
           docker pull "${APP_REPO}:${TAG}" || true
+          echo "Pre-pulling \$WEB_REPO:${TAG}"
           docker pull "${WEB_REPO}:${TAG}" || true
 
       - name: Compose up on Mac
