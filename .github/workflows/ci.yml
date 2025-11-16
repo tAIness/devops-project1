@@ -342,7 +342,7 @@ jobs:
 
       # ⬇️ Build the Allure HTML from the merged folder
       - name: Generate Allure report
-        uses: simple-elf/allure-report-action@v1.7
+        uses: simple-elf/allure-report-action@v1.13
         with:
           allure_results: merged          # <— use the merged folder
           allure_report: public/allure/latest
@@ -384,7 +384,7 @@ jobs:
   notify-slack:
     if: always()
     needs: [ lint, unit-tests, db-tests, e2e, build, snyk-pr, allure-report, deploy-pages ]
-    uses: tAIness/devops-ci-lib/.github/workflows/slack-notify.yml@main   # or @slack-notify-v1
+    uses: tAIness/devops-ci-lib/.github/workflows/slack-notify.yml@main
     secrets: inherit
     with:
       title: "CI (PR checks): ${{ github.head_ref || github.ref_name }}"
