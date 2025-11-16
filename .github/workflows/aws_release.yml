@@ -288,10 +288,6 @@ jobs:
     if: ${{ needs.resolve-target.outputs.target == 'mac' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
     env:
       TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
-      AWS_REGION: ${{ env.AWS_REGION }}
-      AWS_ECR_REGISTRY: ${{ env.AWS_ECR_REGISTRY }}
-      AWS_ECR_REPO_APP: ${{ env.AWS_ECR_REPO_APP }}
-      AWS_ECR_REPO_WEB: ${{ env.AWS_ECR_REPO_WEB }}
       DB_NAME: ${{ vars.DB_NAME }}
       DB_USER: ${{ vars.DB_USER }}
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
@@ -324,7 +320,7 @@ jobs:
           DB_PORT=${DB_PORT}
           FLASK_PORT=${FLASK_PORT}
           EOF
-          sed -n '1,10p' mac-release-flow/.env.local
+          sed -n '1,12p' mac-release-flow/.env.local
 
       - name: Login to Amazon ECR (pull)
         run: |
@@ -455,134 +451,4 @@ jobs:
           kubectl -n "${ARGO_NS}" get deploy,sts,svc,pods -o wide
           echo "::endgroup::"
           echo "::notice::Argo CD admin password:"
-          kubectl -n "${ARGO_NS}" get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -D 2>/dev/null || base64 -d 2>/dev/null || true
-          echo
-
-      - name: Reminder for LoadBalancers
-        run: |
-          echo "::notice::If you use LoadBalancer Services (Argo CD, etc.), run 'minikube tunnel' on the host to allocate external IPs."
-
-  k8s-argocd-minikube:
-    name: Minikube + Argo CD (App-of-Apps)
-    runs-on: [ self-hosted, macOS ]
-    needs: [ resolve-target, setup, build-and-push-app, build-and-push-web, snyk-release ]
-    if: ${{ (needs.resolve-target.outputs.target || 'mac') == 'mac'
-      && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
-    env:
-      TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
-      ARGO_NS: argocd
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Ensure Minikube up (no version pin)
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! minikube status --output=json 2>/dev/null | grep -q '"Host": "Running"'; then
-            minikube start --driver=docker
-            minikube addons enable metrics-server || true
-          fi
-          kubectl config use-context minikube >/dev/null 2>&1 || true
-          kubectl get nodes -o wide || true
-
-      - name: Install/Upgrade Argo CD via Helm (match release name)
-        shell: bash
-        env:
-          ARGO_NS: argocd
-        run: |
-          set -euo pipefail
-          kubectl get ns "${ARGO_NS}" >/dev/null 2>&1 || kubectl create ns "${ARGO_NS}"
-          helm repo add argo https://argoproj.github.io/argo-helm || true
-          helm repo update
-          RELEASE=argocd
-          helm upgrade --install "${RELEASE}" argo/argo-cd \
-            -n "${ARGO_NS}" \
-            --create-namespace \
-            --set server.service.type=NodePort \
-            --set configs.params."server.insecure"=true \
-            --wait --atomic
-          kubectl -n "${ARGO_NS}" get pods
-
-      - name: Deploy App-of-Apps (points to infra/helm/argocd-apps)
-        shell: bash
-        run: |
-          set -euo pipefail
-          helm upgrade --install argocd-apps ./infra/helm/argocd-apps \
-            -n "${ARGO_NS}" \
-            -f ./infra/helm/argocd-apps/values.yaml \
-            --set global.releaseTag="${TAG}" \
-            --wait
-          kubectl -n "${ARGO_NS}" get applications.argoproj.io -o wide || true
-
-  summarize-status:
-    name: Summarize results for Slack
-    if: ${{ always() }}
-    runs-on: ubuntu-latest
-    needs:
-      - resolve-target
-      - build-and-push-app
-      - build-and-push-web
-      - snyk-release
-      - prepare-minikube
-      - deploy-mac
-      - deploy-ec2
-      - k8s-argocd-minikube
-    outputs:
-      status: ${{ steps.sum.outputs.status }}
-      message: ${{ steps.sum.outputs.message }}
-    env:
-      TARGET: ${{ needs.resolve-target.outputs.target || 'mac' }}
-      RES_BUILD_APP: ${{ needs['build-and-push-app'].result      || 'skipped' }}
-      RES_BUILD_WEB: ${{ needs['build-and-push-web'].result      || 'skipped' }}
-      RES_SNYK: ${{ needs['snyk-release'].result                 || 'skipped' }}
-      RES_PREP: ${{ needs['prepare-minikube'].result             || 'skipped' }}
-      RES_DEP_MAC: ${{ needs['deploy-mac'].result                || 'skipped' }}
-      RES_DEP_EC2: ${{ needs['deploy-ec2'].result                || 'skipped' }}
-      RES_ARGO_MINI: ${{ needs['k8s-argocd-minikube'].result     || 'skipped' }}
-    steps:
-      - id: sum
-        name: Build Slack status/message
-        if: ${{ always() }}
-        shell: bash
-        run: |
-          set +e
-          set -u -o pipefail
-
-          failures=()
-          add_if_fail () { local n="$1" v="${2:-}"; [[ "$v" == "failure" ]] && failures+=("$n"); }
-
-          add_if_fail "build-and-push-app" "${RES_BUILD_APP:-skipped}"
-          add_if_fail "build-and-push-web" "${RES_BUILD_WEB:-skipped}"
-          add_if_fail "snyk-release"       "${RES_SNYK:-skipped}"
-
-          if [[ "${TARGET:-mac}" == "mac" ]]; then
-            add_if_fail "prepare-minikube"    "${RES_PREP:-skipped}"
-            add_if_fail "deploy-mac"          "${RES_DEP_MAC:-skipped}"
-            add_if_fail "k8s-argocd-minikube" "${RES_ARGO_MINI:-skipped}"
-          else
-            add_if_fail "deploy-ec2"          "${RES_DEP_EC2:-skipped}"
-          fi
-
-          if ((${#failures[@]})); then
-            echo "status=failure" >>"$GITHUB_OUTPUT"
-            printf 'message=%s\n' "❌ Failed steps: ${failures[*]} · target=${TARGET:-?}" >>"$GITHUB_OUTPUT"
-          else
-            echo "status=success" >>"$GITHUB_OUTPUT"
-            printf 'message=%s\n' "✅ All steps succeeded · target=${TARGET:-?}" >>"$GITHUB_OUTPUT"
-          fi
-          exit 0
-
-  notify-slack:
-    name: notify-slack / send
-    if: ${{ always() }}
-    needs:
-      - setup
-      - summarize-status
-    uses: tAIness/devops-ci-lib/.github/workflows/slack-notify.yml@main
-    secrets: inherit
-    with:
-      title: "Release: ${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
-      status: ${{ needs.summarize-status.outputs.status }}
-      message: ${{ needs.summarize-status.outputs.message }}
-      only_on: "always"
-      run_url: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+          kubectl -n "${ARGO_NS}_
