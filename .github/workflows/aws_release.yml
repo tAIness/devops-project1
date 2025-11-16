@@ -1,6 +1,6 @@
 # yamllint disable rule:line-length rule:indentation
 ---
-name: Release
+name: Release_AWS
 
 on:
   push:
@@ -230,14 +230,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: snyk/actions/setup@0.4.0
       - run: snyk auth "$SNYK_TOKEN"
+
       - name: Build .snyk from ignore list (if present)
         shell: bash
         run: |
           set -euo pipefail
           touch .snyk
           if [[ -f "security/ignores.txt" ]]; then
-            grep -v '^\s*#' security/ignores.txt | sed '/^\s*$/d' | while read -r ID; do
-              snyk ignore --id="$ID" --reason="approved via repo ignore list" --expiry=2099-12-31 --yes --quiet || true
+            awk '!/^#/ && NF {print $1}' security/ignores.txt | while read -r ID; do
+              echo "Adding ignore for $ID"
+              snyk ignore --id="$ID" \
+                --reason="approved via repo ignore list" \
+                --expiry=2099-12-31 \
+                --yes --quiet || true
             done
           fi
 
