@@ -1,0 +1,588 @@
+# yamllint disable rule:line-length rule:indentation
+---
+name: Release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*.*.*']
+  workflow_dispatch:
+    inputs:
+      target:
+        description: "Deploy target (mac=self-hosted, ec2=remote EC2)"
+        type: choice
+        options: [ mac, ec2 ]
+        default: mac
+
+permissions:
+  contents: write
+  packages: write
+  id-token: write
+
+env:
+  AWS_REGION: ${{ vars.AWS_REGION }}
+  AWS_ECR_REGISTRY: ${{ vars.AWS_ECR_REGISTRY }}
+  AWS_ECR_REPO_APP: ${{ vars.AWS_ECR_REPO_APP }}
+  AWS_ECR_REPO_WEB: ${{ vars.AWS_ECR_REPO_WEB }}
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  resolve-target:
+    name: Resolve deploy target
+    runs-on: ubuntu-latest
+    outputs:
+      target: ${{ steps.out.outputs.target }}
+    steps:
+      - id: out
+        shell: bash
+        run: |
+          in="${{ inputs.target }}"
+          var="${{ vars.DEPLOY_TARGET }}"
+          tgt="${in:-${var:-mac}}"
+          echo "target=$tgt" >> "$GITHUB_OUTPUT"
+          echo "Deploy target resolved to: $tgt"
+
+  compute-tag:
+    name: Compute next tag (when pushing to main)
+    runs-on: ubuntu-latest
+    if: ${{ github.ref_type == 'branch' && github.ref_name == 'main' }}
+    outputs:
+      tag: ${{ steps.bump.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Compute next tag (no create)
+        id: bump
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --tags --force
+          last="$(git tag -l 'v*.*.*' | sort -V | tail -n1 || true)"
+          if [[ -z "$last" ]]; then
+            major=1 minor=0 patch=1
+          else
+            IFS=. read -r vM vN vP <<<"${last#v}"
+            major="$vM"; minor="$vN"; patch="$vP"
+            patch=$((10#$patch + 1))
+          fi
+          echo "tag=v${major}.${minor}.${patch}" >> "$GITHUB_OUTPUT"
+
+  setup:
+    name: Resolve image tag
+    runs-on: ubuntu-latest
+    needs: [compute-tag]
+    outputs:
+      IMAGE_TAG: ${{ steps.resolve.outputs.IMAGE_TAG }}
+    steps:
+      - id: resolve
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "IMAGE_TAG=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "IMAGE_TAG=${{ needs.compute-tag.outputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
+
+  bump-helm-appversion:
+    name: Bump Helm appVersion in all charts & push
+    runs-on: ubuntu-latest
+    needs: [compute-tag]
+    if: ${{ github.ref_type == 'branch' && github.ref_name == 'main' }}
+    env:
+      TAG: ${{ needs.compute-tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Install yq (static)
+        run: |
+          set -euo pipefail
+          YQ_VERSION=v4.44.3
+          OS=$(uname); ARCH=$(uname -m)
+          case "$ARCH" in x86_64) ARCH=amd64;; aarch64|arm64) ARCH=arm64;; esac
+          curl -fsSL -o /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_${OS}_${ARCH}"
+          chmod +x /usr/local/bin/yq
+      - name: Update appVersion for ALL charts + write releaseTag
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t charts < <(git ls-files 'infra/helm/**/Chart.yaml')
+          (( ${#charts[@]} )) || { echo "No Chart.yaml under infra/helm"; exit 1; }
+          for f in "${charts[@]}"; do
+            yq -i '.appVersion = env(TAG)' "$f"
+          done
+          yq -i '.global.releaseTag = env(TAG)' infra/helm/argocd-apps/values.yaml
+      - name: Commit & push change
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "No changes to commit."
+          else
+            git add infra/helm/**/Chart.yaml infra/helm/argocd-apps/values.yaml
+            git commit -m "chore(helm): set appVersion & releaseTag ${TAG}"
+            git push origin HEAD:main
+          fi
+
+  create-tag:
+    name: Create & push git tag
+    runs-on: ubuntu-latest
+    needs: [compute-tag, bump-helm-appversion]
+    if: ${{ github.ref_type == 'branch' && github.ref_name == 'main' }}
+    env:
+      TAG: ${{ needs.compute-tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Configure git identity
+        run: |
+          git config user.name  "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+      - name: Tag & push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --all --tags
+          git checkout main
+          git pull --ff-only
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists; skipping create."
+          else
+            git tag -a "$TAG" -m "Release $TAG"
+            git push origin "$TAG"
+          fi
+
+  build-and-push-app:
+    name: Build & push app image (ECR)
+    runs-on: ubuntu-latest
+    needs: [setup]
+    env:
+      IMAGE_TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to Amazon ECR
+        run: |
+          aws ecr get-login-password --region "${AWS_REGION}" \
+            | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
+
+      - name: Build & push app (linux/amd64, linux/arm64) to ECR
+        uses: docker/build-push-action@v6
+        with:
+          context: ./app
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.AWS_ECR_REGISTRY }}/${{ env.AWS_ECR_REPO_APP }}:${{ env.IMAGE_TAG }}
+
+  build-and-push-web:
+    name: Build & push web image (ECR)
+    runs-on: ubuntu-latest
+    needs: [setup]
+    env:
+      IMAGE_TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to Amazon ECR
+        run: |
+          aws ecr get-login-password --region "${AWS_REGION}" \
+            | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
+
+      - name: Build & push web (linux/amd64, linux/arm64) to ECR
+        uses: docker/build-push-action@v6
+        with:
+          context: ./web
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.AWS_ECR_REGISTRY }}/${{ env.AWS_ECR_REPO_WEB }}:${{ env.IMAGE_TAG }}
+
+  snyk-release:
+    name: Snyk scan of images
+    runs-on: ubuntu-latest
+    needs: [setup, build-and-push-app, build-and-push-web]
+    env:
+      IMAGE_TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: snyk/actions/setup@0.4.0
+      - run: snyk auth "$SNYK_TOKEN"
+      - name: Build .snyk from ignore list (if present)
+        shell: bash
+        run: |
+          set -euo pipefail
+          touch .snyk
+          if [[ -f "security/ignores.txt" ]]; then
+            grep -v '^\s*#' security/ignores.txt | sed '/^\s*$/d' | while read -r ID; do
+              snyk ignore --id="$ID" --reason="approved via repo ignore list" --expiry=2099-12-31 --yes --quiet || true
+            done
+          fi
+      - name: Scan & save JSON
+        id: scan
+        shell: bash
+        run: |
+          set +e
+          set -u -o pipefail
+          printf "%s\n" \
+            "${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_APP}:${IMAGE_TAG}" \
+            "${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_WEB}:${IMAGE_TAG}" > images.txt
+          failures=0
+          while read -r IMG; do
+            [[ -z "$IMG" ]] && continue
+            SAFE="$(echo "$IMG" | tr '/:@' '___')"
+            OUT="snyk-${SAFE}.json"
+            snyk container test "$IMG" --severity-threshold=high --json-file-output="$OUT"
+            rc=$?
+            if [ ! -s "$OUT" ]; then
+              snyk container test "$IMG" --severity-threshold=high --json > "$OUT" 2>/dev/null || echo '{"note":"no json"}' > "$OUT"
+            fi
+            if [ $rc -ne 0 ]; then failures=$((failures+1)); fi
+          done < images.txt
+          echo "failures=$failures" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: snyk-reports
+          path: snyk-*.json
+          if-no-files-found: warn
+      - name: Fail if any image failed
+        if: ${{ steps.scan.outputs.failures != '0' }}
+        run: |
+          echo "Blocking release: Snyk found issues above threshold."
+          exit 1
+
+  deploy-ec2:
+    name: Deploy to EC2
+    runs-on: ubuntu-latest
+    needs: [resolve-target, setup, build-and-push-app, build-and-push-web, snyk-release, create-tag]
+    if: ${{ needs.resolve-target.outputs.target == 'ec2' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
+    steps:
+      - run: echo "EC2 flow currently disabled; target=ec2 would run here."
+
+  deploy-mac:
+    name: Deploy on Mac (self-hosted)
+    runs-on: [ self-hosted, macOS ]
+    needs: [ resolve-target, setup, build-and-push-app, build-and-push-web, snyk-release, create-tag ]
+    if: ${{ needs.resolve-target.outputs.target == 'mac' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
+    env:
+      TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
+      AWS_REGION: ${{ env.AWS_REGION }}
+      AWS_ECR_REGISTRY: ${{ env.AWS_ECR_REGISTRY }}
+      AWS_ECR_REPO_APP: ${{ env.AWS_ECR_REPO_APP }}
+      AWS_ECR_REPO_WEB: ${{ env.AWS_ECR_REPO_WEB }}
+      DB_NAME: ${{ vars.DB_NAME }}
+      DB_USER: ${{ vars.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_PORT: ${{ vars.DB_PORT }}
+      FLASK_PORT: ${{ vars.FLASK_PORT }}
+      WEB_PORT: ${{ vars.WEB_PORT || '8082' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC role) for Mac deploy
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Write .env.local for compose
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p mac-release-flow
+          cat > mac-release-flow/.env.local <<EOF
+          AWS_ECR_REGISTRY=${AWS_ECR_REGISTRY}
+          AWS_ECR_REPO_APP=${AWS_ECR_REPO_APP}
+          AWS_ECR_REPO_WEB=${AWS_ECR_REPO_WEB}
+          TAG=${TAG}
+          WEB_PORT=${WEB_PORT}
+          DB_NAME=${DB_NAME}
+          DB_USER=${DB_USER}
+          DB_PASSWORD=${DB_PASSWORD}
+          DB_PORT=${DB_PORT}
+          FLASK_PORT=${FLASK_PORT}
+          EOF
+          sed -n '1,10p' mac-release-flow/.env.local
+
+      - name: Login to Amazon ECR (pull)
+        run: |
+          aws ecr get-login-password --region "${AWS_REGION}" \
+            | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
+
+      - name: Ensure volume & pre-pull images (best effort)
+        shell: bash
+        run: |
+          set -euo pipefail
+          docker volume create supermario_db_data >/dev/null
+          APP_REPO="${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_APP}"
+          WEB_REPO="${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_WEB}"
+          docker pull "${APP_REPO}:${TAG}" || true
+          docker pull "${WEB_REPO}:${TAG}" || true
+
+      - name: Compose up on Mac
+        run: |
+          docker compose \
+            --env-file mac-release-flow/.env.local \
+            -f mac-release-flow/deploy/compose.local.yml up -d --no-build
+          docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+
+      - name: Post-deploy smoke tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -sf http://127.0.0.1:8000/health | jq -e '.status=="ok"' >/dev/null
+          curl -sI http://127.0.0.1:${WEB_PORT:-8082} | grep -q "200 OK"
+          echo "Smoke tests passed: API healthy and web serving 200."
+
+  prepare-minikube:
+    name: Prepare Minikube & Argo CD
+    runs-on: [ self-hosted, macOS ]
+    if: ${{ needs.resolve-target.outputs.target == 'mac' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
+    needs: [ resolve-target ]
+    env:
+      MK_CPUS: "4"
+      MK_MEMORY: "6g"
+      MK_DRIVER: docker
+      ARGO_NS: argocd
+      ARGO_VERSION: "v2.11.7"
+      NS_BACKEND: mario-backend
+      NS_WEB: mario-web
+      NS_MON: monitoring
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure kubectl, helm, minikube
+        shell: bash
+        run: |
+          set -euo pipefail
+          brew update || true
+          brew list --versions kubernetes-cli >/dev/null 2>&1 || brew install kubernetes-cli
+          brew list --versions helm           >/dev/null 2>&1 || brew install helm
+          brew list --versions minikube       >/dev/null 2>&1 || brew install minikube
+          kubectl version --client --output=yaml || true
+          helm version || true
+          minikube version || true
+
+      - name: Start/ensure Minikube (reuse existing; no downgrade)
+        shell: bash
+        env:
+          MK_PROFILE: ${{ vars.MINIKUBE_PROFILE || 'minikube' }}
+          MK_DRIVER:  ${{ vars.MINIKUBE_DRIVER  || 'docker' }}
+          MK_CPUS:    ${{ vars.MINIKUBE_CPUS    || '4' }}
+          MK_MEMORY:  ${{ vars.MINIKUBE_MEMORY  || '6g' }}
+          MK_K8S_VER: ${{ vars.MINIKUBE_K8S_VERSION }}
+        run: |
+          set -euo pipefail
+          echo "Profile=${MK_PROFILE}; driver=${MK_DRIVER}; cpus=${MK_CPUS}; mem=${MK_MEMORY}; requested_k8s=${MK_K8S_VER:-<none>}"
+          is_running() { minikube status -p "${MK_PROFILE}" --output=json 2>/dev/null | grep -q '"Host": "Running"'; }
+          current_version() {
+            minikube -p "${MK_PROFILE}" kubectl -- get nodes -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}' 2>/dev/null || true
+          }
+          if is_running; then
+            CUR_VER="$(current_version)"
+            echo "Minikube already running. Current k8s: ${CUR_VER:-unknown}"
+            if [[ -n "${MK_K8S_VER:-}" && -n "${CUR_VER:-}" && "${CUR_VER#v}" != "${MK_K8S_VER#v}" ]]; then
+              echo "::warning::Requested ${MK_K8S_VER} != running ${CUR_VER}. Reusing existing cluster."
+            fi
+          else
+            ARGS=( -p "${MK_PROFILE}" --driver="${MK_DRIVER}" --cpus="${MK_CPUS}" --memory="${MK_MEMORY}" )
+            if [[ -n "${MK_K8S_VER:-}" ]]; then ARGS+=( --kubernetes-version="${MK_K8S_VER}" ); fi
+            echo "Starting: minikube start ${ARGS[*]}"
+            set +e
+            minikube start "${ARGS[@]}"
+            RC=$?
+            set -e
+            if [[ $RC -ne 0 ]]; then
+              echo "::warning::minikube start failed (rc=$RC). Retrying without --kubernetes-version…"
+              minikube start -p "${MK_PROFILE}" --driver="${MK_DRIVER}" --cpus="${MK_CPUS}" --memory="${MK_MEMORY}"
+            fi
+          fi
+          kubectl config use-context "${MK_PROFILE}" >/dev/null 2>&1 || true
+          kubectl get nodes -o wide || true
+
+      - name: Enable addons (ingress, metrics) — idempotent
+        shell: bash
+        env:
+          MK_PROFILE: ${{ vars.MINIKUBE_PROFILE || 'minikube' }}
+        run: |
+          set -euo pipefail
+          if ! minikube status -p "${MK_PROFILE}" --output=json 2>/dev/null | grep -q '"Host": "Running"'; then
+            echo "::warning::Minikube profile '${MK_PROFILE}' is not running; skipping addon enable."
+            exit 0
+          fi
+          minikube addons enable -p "${MK_PROFILE}" ingress || true
+          minikube addons enable -p "${MK_PROFILE}" metrics-server || true
+          kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s || true
+
+      - name: Install/upgrade Argo CD (server as LoadBalancer)
+        run: |
+          set -euo pipefail
+          kubectl get ns "${ARGO_NS}" >/dev/null 2>&1 || kubectl create ns "${ARGO_NS}"
+          if ! kubectl -n "${ARGO_NS}" get deploy | grep -q '^argocd-server'; then
+            kubectl -n "${ARGO_NS}" apply -f "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGO_VERSION}/manifests/install.yaml"
+          fi
+          kubectl -n "${ARGO_NS}" patch svc argocd-server -p '{"spec":{"type":"LoadBalancer"}}' --type=merge || true
+          kubectl -n "${ARGO_NS}" rollout status deploy/argocd-server --timeout=180s
+          kubectl -n "${ARGO_NS}" rollout status deploy/argocd-repo-server --timeout=180s
+          if kubectl -n "${ARGO_NS}" get statefulset argocd-application-controller >/dev/null 2>&1; then
+            kubectl -n "${ARGO_NS}" rollout status statefulset/argocd-application-controller --timeout=300s
+          else
+            kubectl -n "${ARGO_NS}" rollout status deploy/argocd-application-controller --timeout=300s || true
+          fi
+          echo "::group::Argo CD objects"
+          kubectl -n "${ARGO_NS}" get deploy,sts,svc,pods -o wide
+          echo "::endgroup::"
+          echo "::notice::Argo CD admin password:"
+          kubectl -n "${ARGO_NS}" get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -D 2>/dev/null || base64 -d 2>/dev/null || true
+          echo
+
+      - name: Reminder for LoadBalancers
+        run: |
+          echo "::notice::If you use LoadBalancer Services (Argo CD, etc.), run 'minikube tunnel' on the host to allocate external IPs."
+
+  k8s-argocd-minikube:
+    name: Minikube + Argo CD (App-of-Apps)
+    runs-on: [ self-hosted, macOS ]
+    needs: [ resolve-target, setup, build-and-push-app, build-and-push-web, snyk-release ]
+    if: ${{ (needs.resolve-target.outputs.target || 'mac') == 'mac'
+      && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
+    env:
+      TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
+      ARGO_NS: argocd
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Ensure Minikube up (no version pin)
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! minikube status --output=json 2>/dev/null | grep -q '"Host": "Running"'; then
+            minikube start --driver=docker
+            minikube addons enable metrics-server || true
+          fi
+          kubectl config use-context minikube >/dev/null 2>&1 || true
+          kubectl get nodes -o wide || true
+
+      - name: Install/Upgrade Argo CD via Helm (match release name)
+        shell: bash
+        env:
+          ARGO_NS: argocd
+        run: |
+          set -euo pipefail
+          kubectl get ns "${ARGO_NS}" >/dev/null 2>&1 || kubectl create ns "${ARGO_NS}"
+          helm repo add argo https://argoproj.github.io/argo-helm || true
+          helm repo update
+          RELEASE=argocd
+          helm upgrade --install "${RELEASE}" argo/argo-cd \
+            -n "${ARGO_NS}" \
+            --create-namespace \
+            --set server.service.type=NodePort \
+            --set configs.params."server.insecure"=true \
+            --wait --atomic
+          kubectl -n "${ARGO_NS}" get pods
+
+      - name: Deploy App-of-Apps (points to infra/helm/argocd-apps)
+        shell: bash
+        run: |
+          set -euo pipefail
+          helm upgrade --install argocd-apps ./infra/helm/argocd-apps \
+            -n "${ARGO_NS}" \
+            -f ./infra/helm/argocd-apps/values.yaml \
+            --set global.releaseTag="${TAG}" \
+            --wait
+          kubectl -n "${ARGO_NS}" get applications.argoproj.io -o wide || true
+
+  summarize-status:
+    name: Summarize results for Slack
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    needs:
+      - resolve-target
+      - build-and-push-app
+      - build-and-push-web
+      - snyk-release
+      - prepare-minikube
+      - deploy-mac
+      - deploy-ec2
+      - k8s-argocd-minikube
+    outputs:
+      status: ${{ steps.sum.outputs.status }}
+      message: ${{ steps.sum.outputs.message }}
+    env:
+      TARGET: ${{ needs.resolve-target.outputs.target || 'mac' }}
+      RES_BUILD_APP: ${{ needs['build-and-push-app'].result      || 'skipped' }}
+      RES_BUILD_WEB: ${{ needs['build-and-push-web'].result      || 'skipped' }}
+      RES_SNYK: ${{ needs['snyk-release'].result                 || 'skipped' }}
+      RES_PREP: ${{ needs['prepare-minikube'].result             || 'skipped' }}
+      RES_DEP_MAC: ${{ needs['deploy-mac'].result                || 'skipped' }}
+      RES_DEP_EC2: ${{ needs['deploy-ec2'].result                || 'skipped' }}
+      RES_ARGO_MINI: ${{ needs['k8s-argocd-minikube'].result     || 'skipped' }}
+    steps:
+      - id: sum
+        name: Build Slack status/message
+        if: ${{ always() }}
+        shell: bash
+        run: |
+          set +e
+          set -u -o pipefail
+
+          failures=()
+          add_if_fail () { local n="$1" v="${2:-}"; [[ "$v" == "failure" ]] && failures+=("$n"); }
+
+          add_if_fail "build-and-push-app" "${RES_BUILD_APP:-skipped}"
+          add_if_fail "build-and-push-web" "${RES_BUILD_WEB:-skipped}"
+          add_if_fail "snyk-release"       "${RES_SNYK:-skipped}"
+
+          if [[ "${TARGET:-mac}" == "mac" ]]; then
+            add_if_fail "prepare-minikube"    "${RES_PREP:-skipped}"
+            add_if_fail "deploy-mac"          "${RES_DEP_MAC:-skipped}"
+            add_if_fail "k8s-argocd-minikube" "${RES_ARGO_MINI:-skipped}"
+          else
+            add_if_fail "deploy-ec2"          "${RES_DEP_EC2:-skipped}"
+          fi
+
+          if ((${#failures[@]})); then
+            echo "status=failure" >>"$GITHUB_OUTPUT"
+            printf 'message=%s\n' "❌ Failed steps: ${failures[*]} · target=${TARGET:-?}" >>"$GITHUB_OUTPUT"
+          else
+            echo "status=success" >>"$GITHUB_OUTPUT"
+            printf 'message=%s\n' "✅ All steps succeeded · target=${TARGET:-?}" >>"$GITHUB_OUTPUT"
+          fi
+          exit 0
+
+  notify-slack:
+    name: notify-slack / send
+    if: ${{ always() }}
+    needs:
+      - setup
+      - summarize-status
+    uses: tAIness/devops-ci-lib/.github/workflows/slack-notify.yml@main
+    secrets: inherit
+    with:
+      title: "Release: ${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
+      status: ${{ needs.summarize-status.outputs.status }}
+      message: ${{ needs.summarize-status.outputs.message }}
+      only_on: "always"
+      run_url: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
