@@ -237,14 +237,14 @@ jobs:
           set -euo pipefail
           touch .snyk
           if [[ -f "security/ignores.txt" ]]; then
-            awk '!/^#/ && NF {print $1}' security/ignores.txt | while read -r ID; do
-              echo "Adding ignore for $ID"
-              snyk ignore --id="$ID" \
-                --reason="approved via repo ignore list" \
-                --expiry=2099-12-31 \
-                --yes --quiet || true
-            done
+            # Use grep and xargs to filter comments, non-empty lines, and trim whitespace
+            grep -v '^#' security/ignores.txt | grep -v '^[[:space:]]*$' | xargs -I {} bash -c 'TRIMMED_ID=$(echo "{}" | xargs); snyk ignore --id="$TRIMMED_ID" --reason="approved via repo ignore list" --expiry=2099-12-31 --yes --quiet || echo "Warning: Failed to ignore $TRIMMED_ID"'
           fi
+
+      - name: Login to Amazon ECR for Snyk scan
+        run: |
+          aws ecr get-login-password --region "${AWS_REGION}" \
+            | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
 
       - name: Scan & save JSON
         id: scan
@@ -260,6 +260,7 @@ jobs:
             [[ -z "$IMG" ]] && continue
             SAFE="$(echo "$IMG" | tr '/:@' '___')"
             OUT="snyk-${SAFE}.json"
+            # Add --file if your project has a specific Dockerfile or manifest, though for ECR images it often uses the image directly
             snyk container test "$IMG" --severity-threshold=high --json-file-output="$OUT"
             rc=$?
             if [ ! -s "$OUT" ]; then
@@ -268,6 +269,7 @@ jobs:
             if [ $rc -ne 0 ]; then failures=$((failures+1)); fi
           done < images.txt
           echo "failures=$failures" >> "$GITHUB_OUTPUT"
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
