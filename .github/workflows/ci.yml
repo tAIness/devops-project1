@@ -342,7 +342,7 @@ jobs:
 
       # ⬇️ Build the Allure HTML from the merged folder
       - name: Generate Allure report
-        uses: simple-elf/allure-report-action@v1.7
+        uses: simple-elf/allure-report-action@v1.13
         with:
           allure_results: merged          # <— use the merged folder
           allure_report: public/allure/latest
