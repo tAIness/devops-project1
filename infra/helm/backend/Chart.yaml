@@ -4,4 +4,4 @@ name: backend
 description: Mario backend
 type: application
 version: 0.1.0
-appVersion: "v1.0.226" # ← CI will bump this to your release tag
+appVersion: "v1.0.227" # ← CI will bump this to your release tag
