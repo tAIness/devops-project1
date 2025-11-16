@@ -1,6 +1,6 @@
   # devops-project1/infra/helm/web/values.yaml
   image:
-    repository: docker.io/itaef/supermario-front
+    repository: 254800774721.dkr.ecr.us-east-2.amazonaws.com/supermario-front
     tag: ""                 # use .Chart.AppVersion
     pullPolicy: IfNotPresent
 
