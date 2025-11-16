@@ -18,7 +18,7 @@ apps:
     values:
       fullnameOverride: "app"
       image:
-        repository: docker.io/itaef/supermario-service
+        repository: 254800774721.dkr.ecr.us-east-2.amazonaws.com/supermario-service
         tag: "" # use .Chart.AppVersion
         pullPolicy: IfNotPresent
       service:
@@ -54,7 +54,7 @@ apps:
       version: v3
     values:
       image:
-        repository: docker.io/itaef/supermario-front
+        repository: 254800774721.dkr.ecr.us-east-2.amazonaws.com/supermario-front
         tag: "" # use .Chart.AppVersion
       ingress:
         enabled: true

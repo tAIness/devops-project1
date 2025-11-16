@@ -1,6 +1,6 @@
 # devops-project1/infra/helm/backend/values.yaml
 image:
-  repository: docker.io/itaef/supermario-service
+  repository: 254800774721.dkr.ecr.us-east-2.amazonaws.com/supermario-service
   tag: ""                    # ← empty means “use .Chart.AppVersion”
   pullPolicy: IfNotPresent
 
