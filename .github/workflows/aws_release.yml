@@ -354,17 +354,19 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p mac-release-flow
-          cat > mac-release-flow/.env.local <<EOF
-APP_IMAGE=${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_APP}
-WEB_IMAGE=${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_WEB}
-TAG=${TAG}
-WEB_PORT=${WEB_PORT}
-DB_NAME=${DB_NAME}
-DB_USER=${DB_USER}
-DB_PASSWORD=${DB_PASSWORD}
-DB_PORT=${DB_PORT}
-FLASK_PORT=${FLASK_PORT}
-EOF
+
+          {
+            echo "APP_IMAGE=${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_APP}"
+            echo "WEB_IMAGE=${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_WEB}"
+            echo "TAG=${TAG}"
+            echo "WEB_PORT=${WEB_PORT}"
+            echo "DB_NAME=${DB_NAME}"
+            echo "DB_USER=${DB_USER}"
+            echo "DB_PASSWORD=${DB_PASSWORD}"
+            echo "DB_PORT=${DB_PORT}"
+            echo "FLASK_PORT=${FLASK_PORT}"
+          } > mac-release-flow/.env.local
+
           echo "===== .env.local ====="
           sed -n '1,10p' mac-release-flow/.env.local
 
