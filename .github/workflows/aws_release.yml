@@ -483,27 +483,6 @@ jobs:
           minikube addons enable -p "${MK_PROFILE}" metrics-server || true
           kubectl -n ingress-nginx rollout status deploy/ingress-nginx-controller --timeout=180s || true
 
-      - name: Install/upgrade Argo CD (server as LoadBalancer)
-        run: |
-          set -euo pipefail
-          kubectl get ns "${ARGO_NS}" >/dev/null 2>&1 || kubectl create ns "${ARGO_NS}"
-          if ! kubectl -n "${ARGO_NS}" get deploy | grep -q '^argocd-server'; then
-            kubectl -n "${ARGO_NS}" apply -f "https://raw.githubusercontent.com/argoproj/argo-cd/${ARGO_VERSION}/manifests/install.yaml"
-          fi
-          kubectl -n "${ARGO_NS}" patch svc argocd-server -p '{"spec":{"type":"LoadBalancer"}}' --type=merge || true
-          kubectl -n "${ARGO_NS}" rollout status deploy/argocd-server --timeout=180s
-          kubectl -n "${ARGO_NS}" rollout status deploy/argocd-repo-server --timeout=180s
-          if kubectl -n "${ARGO_NS}" get statefulset argocd-application-controller >/dev/null 2>&1; then
-            kubectl -n "${ARGO_NS}" rollout status statefulset/argocd-application-controller --timeout=300s
-          else
-            kubectl -n "${ARGO_NS}" rollout status deploy/argocd-application-controller --timeout=300s || true
-          fi
-          echo "::group::Argo CD objects"
-          kubectl -n "${ARGO_NS}" get deploy,sts,svc,pods -o wide
-          echo "::endgroup::"
-          echo "::notice::Argo CD admin password:"
-          kubectl -n "${ARGO_NS}" get secret argocd-initial-admin-secret -o jsonpath='{.data.password}' | base64 -D 2>/dev/null || base64 -d 2>/dev/null || true
-          echo
 
       - name: Reminder for LoadBalancers
         run: |
