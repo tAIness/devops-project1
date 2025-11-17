@@ -1,4 +1,3 @@
-# devops-project1/infra/helm/backend/templates/deployment.yaml
 {{- $name := default .Chart.Name .Values.nameOverride | trunc 63 | trimSuffix "-" -}}
 {{- $fullname := (.Values.fullnameOverride | default (printf "%s-%s" .Release.Name $name)) | trunc 63 | trimSuffix "-" -}}
 ---
@@ -26,6 +25,12 @@ spec:
         - name: etc-passwd
           emptyDir: {}
       {{- end }}
+
+      {{- if .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml .Values.imagePullSecrets | nindent 8 }}
+      {{- end }}
+
       initContainers:
         {{- if (default false (get (default (dict) .Values.runtime) "fixPasswd")) }}
         - name: fix-passwd
