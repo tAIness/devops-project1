@@ -507,15 +507,20 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Ensure Minikube up (no version pin)
+      - name: Ensure Minikube is running (reuse from prepare-minikube)
         shell: bash
         run: |
           set -euo pipefail
+
+          echo "Checking Minikube status..."
           if ! minikube status --output=json 2>/dev/null | grep -q '"Host": "Running"'; then
-            minikube start --driver=docker
-            minikube addons enable metrics-server || true
+            echo "::error::Minikube is not running. Check the 'prepare-minikube' job logs."
+            minikube status --output=json || true
+            exit 1
           fi
+
           kubectl config use-context minikube >/dev/null 2>&1 || true
+          echo "Minikube nodes:"
           kubectl get nodes -o wide || true
 
       - name: Install/Upgrade Argo CD via Helm (match release name)
