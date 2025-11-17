@@ -21,6 +21,8 @@ apps:
         repository: 254800774721.dkr.ecr.us-east-2.amazonaws.com/supermario-service
         tag: "" # use .Chart.AppVersion
         pullPolicy: IfNotPresent
+      imagePullSecrets:
+        - name: ecr-creds
       service:
         port: 8000
       ingress:
@@ -56,6 +58,8 @@ apps:
       image:
         repository: 254800774721.dkr.ecr.us-east-2.amazonaws.com/supermario-front
         tag: "" # use .Chart.AppVersion
+      imagePullSecrets:
+        - name: ecr-creds
       ingress:
         enabled: true
         host: web.mario.local
