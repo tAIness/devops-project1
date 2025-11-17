@@ -1,3 +1,5 @@
+version: "3.9"
+
 services:
   db:
     image: postgres:15
@@ -19,14 +21,13 @@ services:
       retries: 20
 
   app:
-    image: ${AWS_ECR_REPO_APP}:${TAG}
+    image: ${APP_IMAGE}:${TAG}
     pull_policy: never
     container_name: supermario_app
     depends_on:
       db:
         condition: service_healthy
     environment:
-      # IMPORTANT: inside the compose network Postgres is always on 5432
       DB_URL: postgresql://${DB_USER:-mario}:${DB_PASSWORD:-mario123}@db:5432/${DB_NAME:-mario}?sslmode=disable
       FLASK_PORT: ${FLASK_PORT:-8000}
     ports:
@@ -38,7 +39,7 @@ services:
       retries: 40
 
   web:
-    image: ${AWS_ECR_REPO_WEB}:${TAG}
+    image: ${WEB_IMAGE}:${TAG}
     pull_policy: never
     container_name: supermario_web
     depends_on:
@@ -47,7 +48,7 @@ services:
     environment:
       BACKEND_URL: "http://app:${FLASK_PORT:-8000}"
     ports:
-      - "${WEB_PORT:-8080}:80"
+      - "${WEB_PORT:-8082}:80"
 
 volumes:
   supermario_db_data: {}
