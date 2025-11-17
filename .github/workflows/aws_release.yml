@@ -616,10 +616,10 @@ jobs:
 
           if ((${#failures[@]})); then
             echo "status=failure" >>"$GITHUB_OUTPUT"
-            printf 'message=%s\n' "❌ Failed steps: ${failures[*]} · target=${TARGET:-?}" >>"$GITHUB_OUTPUT"
+            printf 'message=%s\n' "Failed steps: ${failures[*]} · target=${TARGET:-?}" >>"$GITHUB_OUTPUT"
           else
             echo "status=success" >>"$GITHUB_OUTPUT"
-            printf 'message=%s\n' "✅ All steps succeeded · target=${TARGET:-?}" >>"$GITHUB_OUTPUT"
+            printf 'message=%s\n' "All steps succeeded · target=${TARGET:-?}" >>"$GITHUB_OUTPUT"
           fi
           exit 0
 
