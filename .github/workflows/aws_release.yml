@@ -343,36 +343,38 @@ jobs:
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
 
-      - name: Write .env.local for compose (ECR images)
+      - name: Write .env.local for compose
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p mac-release-flow
           cat > mac-release-flow/.env.local <<EOF
-          DOCKERHUB_REPO_APP=${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_APP}
-          DOCKERHUB_REPO_WEB=${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_WEB}
-          TAG=${TAG}
-          WEB_PORT=${WEB_PORT}
-          DB_NAME=${DB_NAME}
-          DB_USER=${DB_USER}
-          DB_PASSWORD=${DB_PASSWORD}
-          DB_PORT=${DB_PORT}
-          FLASK_PORT=${FLASK_PORT}
-          EOF
+         APP_IMAGE=${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_APP}
+         WEB_IMAGE=${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_WEB}
+         TAG=${TAG}
+         WEB_PORT=${WEB_PORT}
+         DB_NAME=${DB_NAME}
+         DB_USER=${DB_USER}
+         DB_PASSWORD=${DB_PASSWORD}
+         DB_PORT=${DB_PORT}
+         FLASK_PORT=${FLASK_PORT}
+         EOF
           echo "===== .env.local ====="
           sed -n '1,10p' mac-release-flow/.env.local
 
-      - name: Ensure volume & pre-pull images (from ECR)
+      - name: Ensure volume & pre-pull images (best effort)
         shell: bash
         run: |
           set -euo pipefail
           docker volume create supermario_db_data >/dev/null
-          APP_REPO="$(grep '^DOCKERHUB_REPO_APP=' mac-release-flow/.env.local | cut -d= -f2)"
-          WEB_REPO="$(grep '^DOCKERHUB_REPO_WEB=' mac-release-flow/.env.local | cut -d= -f2)"
-          echo "Pre-pulling \$APP_REPO:${TAG}"
-          docker pull "${APP_REPO}:${TAG}" || true
-          echo "Pre-pulling \$WEB_REPO:${TAG}"
-          docker pull "${WEB_REPO}:${TAG}" || true
+          APP_IMAGE="$(grep '^APP_IMAGE=' mac-release-flow/.env.local | cut -d= -f2)"
+          WEB_IMAGE="$(grep '^WEB_IMAGE=' mac-release-flow/.env.local | cut -d= -f2)"
+            
+          echo "Pre-pulling $APP_IMAGE:${TAG}"
+          docker pull "${APP_IMAGE}:${TAG}" || true
+            
+          echo "Pre-pulling $WEB_IMAGE:${TAG}"
+          docker pull "${WEB_IMAGE}:${TAG}" || true
 
       - name: Compose up on Mac
         run: |
