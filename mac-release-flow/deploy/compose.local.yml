@@ -19,7 +19,7 @@ services:
       retries: 20
 
   app:
-    image: ${DOCKERHUB_REPO_APP}:${TAG}
+    image: ${AWS_ECR_REPO_APP}:${TAG}
     pull_policy: never
     container_name: supermario_app
     depends_on:
@@ -38,7 +38,7 @@ services:
       retries: 40
 
   web:
-    image: ${DOCKERHUB_REPO_WEB}:${TAG}
+    image: ${AWS_ECR_REPO_WEB}:${TAG}
     pull_policy: never
     container_name: supermario_web
     depends_on:
