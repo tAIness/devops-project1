@@ -511,8 +511,7 @@ EOF
     name: Minikube + Argo CD (App-of-Apps)
     runs-on: [ self-hosted, macOS ]
     needs: [ resolve-target, setup, build-and-push-app, build-and-push-web, snyk-release ]
-    if: ${{ (needs.resolve-target.outputs.target || 'mac') == 'mac'
-      && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
+    if: ${{ (needs.resolve-target.outputs.target == 'mac' || needs.resolve-target.outputs.target == '') && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
     env:
       TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
       ARGO_NS: argocd
@@ -525,7 +524,7 @@ EOF
           set -euo pipefail
 
           echo "Checking Minikube status..."
-          if ! minikube status --output=json 2>/div/null | grep -q '"Host": "Running"'; then
+          if ! minikube status --output=json 2>/dev/null | grep -q '"Host": "Running"'; then
             echo "::error::Minikube is not running. Check the 'prepare-minikube' job logs."
             minikube status --output=json || true
             exit 1
