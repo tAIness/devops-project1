@@ -53,7 +53,8 @@ jobs:
       tag: ${{ steps.bump.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
       - name: Compute next tag (no create)
         id: bump
         shell: bash
@@ -96,14 +97,19 @@ jobs:
       TAG: ${{ needs.compute-tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
       - name: Install yq (static)
         run: |
           set -euo pipefail
           YQ_VERSION=v4.44.3
           OS=$(uname); ARCH=$(uname -m)
-          case "$ARCH" in x86_64) ARCH=amd64;; aarch64|arm64) ARCH=arm64;; esac
-          curl -fsSL -o /usr/local/bin/yq "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_${OS}_${ARCH}"
+          case "$ARCH" in
+            x86_64) ARCH=amd64 ;;
+            aarch64|arm64) ARCH=arm64 ;;
+          esac
+          curl -fsSL -o /usr/local/bin/yq \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_${OS}_${ARCH}"
           chmod +x /usr/local/bin/yq
       - name: Update appVersion for ALL charts + write releaseTag
         shell: bash
@@ -137,12 +143,12 @@ jobs:
       TAG: ${{ needs.compute-tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
       - name: Configure git identity
         run: |
           git config user.name  "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
-
       - name: Tag & push
         shell: bash
         run: |
@@ -343,22 +349,22 @@ jobs:
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
 
-      - name: Write .env.local for compose (ECR images)
+      - name: Write .env.local for compose
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p mac-release-flow
           cat > mac-release-flow/.env.local <<EOF
-         APP_IMAGE=${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_APP}
-         WEB_IMAGE=${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_WEB}
-         TAG=${TAG}
-         WEB_PORT=${WEB_PORT}
-         DB_NAME=${DB_NAME}
-         DB_USER=${DB_USER}
-         DB_PASSWORD=${DB_PASSWORD}
-         DB_PORT=${DB_PORT}
-         FLASK_PORT=${FLASK_PORT}
-         EOF
+APP_IMAGE=${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_APP}
+WEB_IMAGE=${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_WEB}
+TAG=${TAG}
+WEB_PORT=${WEB_PORT}
+DB_NAME=${DB_NAME}
+DB_USER=${DB_USER}
+DB_PASSWORD=${DB_PASSWORD}
+DB_PORT=${DB_PORT}
+FLASK_PORT=${FLASK_PORT}
+EOF
           echo "===== .env.local ====="
           sed -n '1,10p' mac-release-flow/.env.local
 
@@ -369,10 +375,10 @@ jobs:
           docker volume create supermario_db_data >/dev/null
           APP_IMAGE="$(grep '^APP_IMAGE=' mac-release-flow/.env.local | cut -d= -f2)"
           WEB_IMAGE="$(grep '^WEB_IMAGE=' mac-release-flow/.env.local | cut -d= -f2)"
-            
+
           echo "Pre-pulling $APP_IMAGE:${TAG}"
           docker pull "${APP_IMAGE}:${TAG}" || true
-            
+
           echo "Pre-pulling $WEB_IMAGE:${TAG}"
           docker pull "${WEB_IMAGE}:${TAG}" || true
 
@@ -431,7 +437,9 @@ jobs:
         run: |
           set -euo pipefail
           echo "Profile=${MK_PROFILE}; driver=${MK_DRIVER}; cpus=${MK_CPUS}; mem=${MK_MEMORY}; requested_k8s=${MK_K8S_VER:-<none>}"
-          is_running() { minikube status -p "${MK_PROFILE}" --output=json 2>/dev/null | grep -q '"Host": "Running"'; }
+          is_running() {
+            minikube status -p "${MK_PROFILE}" --output=json 2>/dev/null | grep -q '"Host": "Running"'
+          }
           current_version() {
             minikube -p "${MK_PROFILE}" kubectl -- get nodes -o jsonpath='{.items[0].status.nodeInfo.kubeletVersion}' 2>/dev/null || true
           }
@@ -443,7 +451,9 @@ jobs:
             fi
           else
             ARGS=( -p "${MK_PROFILE}" --driver="${MK_DRIVER}" --cpus="${MK_CPUS}" --memory="${MK_MEMORY}" )
-            if [[ -n "${MK_K8S_VER:-}" ]]; then ARGS+=( --kubernetes-version="${MK_K8S_VER}" ); fi
+            if [[ -n "${MK_K8S_VER:-}" ]]; then
+              ARGS+=( --kubernetes-version="${MK_K8S_VER}" )
+            fi
             echo "Starting: minikube start ${ARGS[*]}"
             set +e
             minikube start "${ARGS[@]}"
@@ -515,7 +525,7 @@ jobs:
           set -euo pipefail
 
           echo "Checking Minikube status..."
-          if ! minikube status --output=json 2>/dev/null | grep -q '"Host": "Running"'; then
+          if ! minikube status --output=json 2>/div/null | grep -q '"Host": "Running"'; then
             echo "::error::Minikube is not running. Check the 'prepare-minikube' job logs."
             minikube status --output=json || true
             exit 1
@@ -613,7 +623,6 @@ jobs:
           exit 0
 
   notify-slack:
-
     name: notify-slack / send
     if: ${{ always() }}
     needs:
