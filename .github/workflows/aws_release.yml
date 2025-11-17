@@ -343,7 +343,7 @@ jobs:
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
 
-      - name: Write .env.local for compose
+      - name: Write .env.local for compose (ECR images)
         shell: bash
         run: |
           set -euo pipefail
