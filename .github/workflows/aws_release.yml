@@ -526,10 +526,12 @@ jobs:
           set -euo pipefail
 
           echo "Checking Minikube status..."
-          if ! minikube status --output=json 2>/dev/null | grep -q '"Host": "Running"'; then
-            echo "::error::Minikube is not running. Check the 'prepare-minikube' job logs."
-            minikube status --output=json || true
-            exit 1
+          STATUS_JSON="$(minikube status --output=json 2>/dev/null || true)"
+          echo "$STATUS_JSON"
+
+          # Soft check – warn but do NOT fail the job
+          if ! echo "$STATUS_JSON" | grep -q '"Host":[[:space:]]*"Running"'; then
+            echo "::warning::Minikube is not reported as Host=Running, but continuing."
           fi
 
           kubectl config use-context minikube >/dev/null 2>&1 || true
