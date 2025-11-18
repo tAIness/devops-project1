@@ -20,15 +20,15 @@ spec:
         app.kubernetes.io/name: {{ $name }}
         app.kubernetes.io/instance: {{ .Release.Name }}
     spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+
       {{- if (default false (get (default (dict) .Values.runtime) "fixPasswd")) }}
       volumes:
         - name: etc-passwd
           emptyDir: {}
-      {{- end }}
-
-      {{- if .Values.imagePullSecrets }}
-      imagePullSecrets:
-        {{- toYaml .Values.imagePullSecrets | nindent 8 }}
       {{- end }}
 
       initContainers:
@@ -69,6 +69,7 @@ spec:
                 secretKeyRef:
                   name: {{ .Values.db.secrets.credsName | default "db-secrets" }}
                   key: POSTGRES_DB
+
       containers:
         - name: app
           image: "{{ .Values.image.repository }}:{{ default .Chart.AppVersion .Values.image.tag }}"
