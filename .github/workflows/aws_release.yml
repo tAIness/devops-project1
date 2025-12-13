@@ -29,6 +29,7 @@ env:
   AWS_ECR_REPO_APP: ${{ vars.AWS_ECR_REPO_APP }}
   AWS_ECR_REPO_WEB: ${{ vars.AWS_ECR_REPO_WEB }}
 
+# Keep workflow-level concurrency for builds
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -54,32 +55,22 @@ jobs:
           fi
 
   compute-tag:
-    name: Compute tag (branch main -> next tag, tag event -> use tag)
+    name: Compute next tag (when pushing to main)
     runs-on: ubuntu-latest
+    if: ${{ github.ref_type == 'branch' && github.ref_name == 'main' }}
     outputs:
       tag: ${{ steps.bump.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
-      - name: Compute tag
+      - name: Compute next tag (no create)
         id: bump
         shell: bash
         run: |
           set -euo pipefail
-
-          REF_TYPE="${{ github.ref_type }}"
-          REF_NAME="${{ github.ref_name }}"
-
-          if [[ "$REF_TYPE" == "tag" ]]; then
-            echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-
           git fetch --tags --force
           last="$(git tag -l 'v*.*.*' | sort -V | tail -n1 || true)"
-
           if [[ -z "$last" ]]; then
             major=1 minor=0 patch=1
           else
@@ -87,7 +78,6 @@ jobs:
             major="$vM"; minor="$vN"; patch="$vP"
             patch=$((10#$patch + 1))
           fi
-
           echo "tag=v${major}.${minor}.${patch}" >> "$GITHUB_OUTPUT"
 
   setup:
@@ -101,28 +91,23 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          echo "IMAGE_TAG=${{ needs.compute-tag.outputs.tag }}" >> "$GITHUB_OUTPUT"
+          if [[ "${{ github.ref_type }}" == "tag" ]]; then
+            echo "IMAGE_TAG=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "IMAGE_TAG=${{ needs.compute-tag.outputs.tag }}" >> "$GITHUB_OUTPUT"
+          fi
 
   bump-helm-appversion:
-    name: Bump Helm appVersion in all charts & push (main only; no-op on tags)
+    name: Bump Helm appVersion in all charts & push
     runs-on: ubuntu-latest
     needs: [compute-tag]
+    if: ${{ github.ref_type == 'branch' && github.ref_name == 'main' }}
     env:
       TAG: ${{ needs.compute-tag.outputs.tag }}
     steps:
-      - name: Skip unless main branch push
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "${{ github.ref_type }}" != "branch" || "${{ github.ref_name }}" != "main" ]]; then
-            echo "Not a main branch push; skipping helm bump."
-            exit 0
-          fi
-
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: Install yq (static)
         run: |
           set -euo pipefail
@@ -135,7 +120,6 @@ jobs:
           curl -fsSL -o /usr/local/bin/yq \
             "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_${OS}_${ARCH}"
           chmod +x /usr/local/bin/yq
-
       - name: Update appVersion for ALL charts + write releaseTag
         shell: bash
         run: |
@@ -146,7 +130,6 @@ jobs:
             yq -i '.appVersion = env(TAG)' "$f"
           done
           yq -i '.global.releaseTag = env(TAG)' infra/helm/argocd-apps/values.yaml
-
       - name: Commit & push change
         run: |
           set -euo pipefail
@@ -161,30 +144,20 @@ jobs:
           fi
 
   create-tag:
-    name: Create & push git tag (main only; no-op on tag runs)
+    name: Create & push git tag
     runs-on: ubuntu-latest
     needs: [compute-tag, bump-helm-appversion]
+    if: ${{ github.ref_type == 'branch' && github.ref_name == 'main' }}
     env:
       TAG: ${{ needs.compute-tag.outputs.tag }}
     steps:
-      - name: Skip unless main branch push
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ "${{ github.ref_type }}" != "branch" || "${{ github.ref_name }}" != "main" ]]; then
-            echo "Not a main branch push; skipping tag create."
-            exit 0
-          fi
-
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-
       - name: Configure git identity
         run: |
           git config user.name  "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
-
       - name: Tag & push
         shell: bash
         run: |
@@ -205,22 +178,18 @@ jobs:
     needs: [resolve-runner, setup]
     steps:
       - uses: actions/checkout@v4
-
       - name: Configure AWS credentials (OIDC role)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-
       - uses: docker/setup-buildx-action@v3
-
       - name: Login to Amazon ECR
         shell: bash
         run: |
           set -euo pipefail
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
-
       - name: Build & push app to ECR
         uses: docker/build-push-action@v6
         with:
@@ -237,22 +206,18 @@ jobs:
     needs: [resolve-runner, setup]
     steps:
       - uses: actions/checkout@v4
-
       - name: Configure AWS credentials (OIDC role)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
-
       - uses: docker/setup-buildx-action@v3
-
       - name: Login to Amazon ECR
         shell: bash
         run: |
           set -euo pipefail
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
-
       - name: Build & push web to ECR
         uses: docker/build-push-action@v6
         with:
@@ -268,21 +233,24 @@ jobs:
     runs-on: [self-hosted, ec2]
     needs: [setup, build-and-push-app, build-and-push-web, create-tag]
     if: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && (github.event_name != 'workflow_dispatch' || inputs.deploy == true) }}
+
+    # IMPORTANT: don't cancel deploy if a new push happens
+    concurrency:
+      group: deploy-ec2-${{ github.ref }}
+      cancel-in-progress: false
+
     env:
       TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
       AWS_REGION: ${{ vars.AWS_REGION }}
       AWS_ECR_REGISTRY: ${{ vars.AWS_ECR_REGISTRY }}
-
       IMAGE_REPO_APP: ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_APP }}
       IMAGE_REPO_WEB: ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_WEB }}
-
       DB_NAME: ${{ vars.DB_NAME }}
       DB_USER: ${{ vars.DB_USER }}
       DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
       DB_PORT: ${{ vars.DB_PORT }}
       FLASK_PORT: ${{ vars.FLASK_PORT }}
       WEB_PORT: ${{ vars.WEB_PORT }}
-
     steps:
       - uses: actions/checkout@v4
 
@@ -299,33 +267,21 @@ jobs:
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
 
-      - name: Ensure Docker Compose v2 (install in $HOME if missing)
+      - name: Pick compose command (docker compose or docker-compose)
+        id: compose
         shell: bash
         run: |
           set -euo pipefail
-
           if docker compose version >/dev/null 2>&1; then
-            docker compose version
-            exit 0
+            echo "cmd=docker compose" >> "$GITHUB_OUTPUT"
+          elif command -v docker-compose >/dev/null 2>&1; then
+            echo "cmd=docker-compose" >> "$GITHUB_OUTPUT"
+          else
+            echo "Neither 'docker compose' nor 'docker-compose' is installed on this runner."
+            exit 1
           fi
 
-          mkdir -p "$HOME/.docker/cli-plugins"
-
-          ARCH="$(uname -m)"
-          case "$ARCH" in
-            x86_64|amd64) BIN="docker-compose-linux-x86_64" ;;
-            aarch64|arm64) BIN="docker-compose-linux-aarch64" ;;
-            *) echo "Unsupported arch: $ARCH"; exit 1 ;;
-          esac
-
-          VER="v2.27.0"
-          curl -fsSL "https://github.com/docker/compose/releases/download/${VER}/${BIN}" \
-            -o "$HOME/.docker/cli-plugins/docker-compose"
-          chmod +x "$HOME/.docker/cli-plugins/docker-compose"
-
-          docker compose version
-
-      - name: Write .env for compose (compose auto-loads .env)
+      - name: Write .env for compose
         shell: bash
         run: |
           set -euo pipefail
@@ -337,23 +293,21 @@ jobs:
           WEBP="${WEB_PORT:-8082}"
 
           cat > "$BASE_DIR/.env" <<EOF
-          IMAGE_REPO_APP=${IMAGE_REPO_APP}
-          IMAGE_REPO_WEB=${IMAGE_REPO_WEB}
-          TAG=${TAG}
-
-          DB_NAME=${DB_NAME}
-          DB_USER=${DB_USER}
-          DB_PASSWORD=${DB_PASSWORD}
-          DB_PORT=${DBP}
-
-          FLASK_PORT=${APIP}
-          WEB_PORT=${WEBP}
-          EOF
+IMAGE_REPO_APP=${IMAGE_REPO_APP}
+IMAGE_REPO_WEB=${IMAGE_REPO_WEB}
+TAG=${TAG}
+DB_NAME=${DB_NAME}
+DB_USER=${DB_USER}
+DB_PASSWORD=${DB_PASSWORD}
+DB_PORT=${DBP}
+FLASK_PORT=${APIP}
+WEB_PORT=${WEBP}
+EOF
 
           chmod 600 "$BASE_DIR/.env"
           echo "Wrote $BASE_DIR/.env"
 
-      - name: Copy compose + content/images so web volume mount exists
+      - name: Copy docker compose file
         shell: bash
         run: |
           set -euo pipefail
@@ -361,37 +315,33 @@ jobs:
           mkdir -p "$BASE_DIR"
           cp -f deploy/compose.yml "$BASE_DIR/compose.yml"
 
-          mkdir -p "$BASE_DIR/content"
-          if [[ -d "deploy/content/images" ]]; then
-            rsync -a --delete "deploy/content/images/" "$BASE_DIR/content/images/"
-          elif [[ -d "content/images" ]]; then
-            rsync -a --delete "content/images/" "$BASE_DIR/content/images/"
-          else
-            echo "WARNING: no deploy/content/images or content/images found in repo. Creating empty dir."
-            mkdir -p "$BASE_DIR/content/images"
-          fi
-
-      - name: Deploy with docker compose
+      - name: Deploy with compose
         shell: bash
         run: |
           set -euo pipefail
           BASE_DIR="$HOME/supermario"
           cd "$BASE_DIR"
 
+          echo "Docker version:"
+          docker version || true
+          docker info || true
+
+          echo "Pulling images:"
           docker pull "${IMAGE_REPO_APP}:${TAG}"
           docker pull "${IMAGE_REPO_WEB}:${TAG}"
 
           docker volume create supermario_db_data >/dev/null 2>&1 || true
 
-          docker compose -f compose.yml up -d --no-build
+          COMPOSE="${{ steps.compose.outputs.cmd }}"
+          $COMPOSE -f compose.yml up -d --no-build --remove-orphans
+          $COMPOSE -f compose.yml ps || true
 
           docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 
-      - name: Smoke test (retries)
+      - name: Smoke test (wait & retry)
         shell: bash
         run: |
           set -euo pipefail
-
           BASE_DIR="$HOME/supermario"
           APIP="${FLASK_PORT:-8000}"
 
@@ -407,7 +357,7 @@ jobs:
           done
 
           if [[ "$ok" -ne 1 ]]; then
-            echo "App health failed after retries. Dumping logs:"
+            echo "App health failed. Dumping logs:"
             docker compose -f "$BASE_DIR/compose.yml" logs --no-color --tail=300 app || true
             docker compose -f "$BASE_DIR/compose.yml" logs --no-color --tail=300 db || true
             exit 1
@@ -426,7 +376,7 @@ jobs:
           done
 
           if [[ "$ok" -ne 1 ]]; then
-            echo "Web check failed after retries. Dumping logs:"
+            echo "Web check failed. Dumping logs:"
             docker compose -f "$BASE_DIR/compose.yml" logs --no-color --tail=300 web || true
             exit 1
           fi
