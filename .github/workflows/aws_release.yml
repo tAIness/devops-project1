@@ -273,7 +273,6 @@ jobs:
       AWS_REGION: ${{ vars.AWS_REGION }}
       AWS_ECR_REGISTRY: ${{ vars.AWS_ECR_REGISTRY }}
 
-      # These match your compose.yml: ${IMAGE_REPO_APP}:${TAG}, ${IMAGE_REPO_WEB}:${TAG}
       IMAGE_REPO_APP: ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_APP }}
       IMAGE_REPO_WEB: ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_WEB }}
 
@@ -283,6 +282,7 @@ jobs:
       DB_PORT: ${{ vars.DB_PORT }}
       FLASK_PORT: ${{ vars.FLASK_PORT }}
       WEB_PORT: ${{ vars.WEB_PORT }}
+
     steps:
       - uses: actions/checkout@v4
 
@@ -361,15 +361,13 @@ jobs:
           mkdir -p "$BASE_DIR"
           cp -f deploy/compose.yml "$BASE_DIR/compose.yml"
 
-          # Your compose uses: ./content/images:/usr/share/nginx/html/images:ro
-          # So we must ensure $BASE_DIR/content/images exists.
           mkdir -p "$BASE_DIR/content"
           if [[ -d "deploy/content/images" ]]; then
             rsync -a --delete "deploy/content/images/" "$BASE_DIR/content/images/"
           elif [[ -d "content/images" ]]; then
             rsync -a --delete "content/images/" "$BASE_DIR/content/images/"
           else
-            echo "WARNING: no deploy/content/images or content/images found in repo. Web container may fail due to missing bind mount."
+            echo "WARNING: no deploy/content/images or content/images found in repo. Creating empty dir."
             mkdir -p "$BASE_DIR/content/images"
           fi
 
@@ -380,7 +378,6 @@ jobs:
           BASE_DIR="$HOME/supermario"
           cd "$BASE_DIR"
 
-          # Pull the exact images referenced by compose.yml
           docker pull "${IMAGE_REPO_APP}:${TAG}"
           docker pull "${IMAGE_REPO_WEB}:${TAG}"
 
@@ -390,17 +387,51 @@ jobs:
 
           docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 
-      - name: Smoke test
+      - name: Smoke test (retries)
         shell: bash
         run: |
           set -euo pipefail
+
+          BASE_DIR="$HOME/supermario"
           APIP="${FLASK_PORT:-8000}"
 
-          # App health
-          curl -sf "http://127.0.0.1:${APIP}/health" || (docker compose -f "$HOME/supermario/compose.yml" logs --no-color --tail=200 app || true; exit 1)
+          echo "Waiting for app health on http://127.0.0.1:${APIP}/health ..."
+          ok=0
+          for i in {1..25}; do
+            if curl -sf "http://127.0.0.1:${APIP}/health" >/dev/null; then
+              ok=1
+              break
+            fi
+            echo "Attempt $i/25 failed; sleeping 2s..."
+            sleep 2
+          done
 
-          # Web is pinned to 80:80 in compose.yml
-          curl -sI "http://127.0.0.1:80" | grep -q "200 OK"
+          if [[ "$ok" -ne 1 ]]; then
+            echo "App health failed after retries. Dumping logs:"
+            docker compose -f "$BASE_DIR/compose.yml" logs --no-color --tail=300 app || true
+            docker compose -f "$BASE_DIR/compose.yml" logs --no-color --tail=300 db || true
+            exit 1
+          fi
+
+          echo "Waiting for web on http://127.0.0.1:80 ..."
+          ok=0
+          for i in {1..25}; do
+            code="$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:80" || true)"
+            if [[ "$code" == "200" || "$code" == "301" || "$code" == "302" ]]; then
+              ok=1
+              break
+            fi
+            echo "Attempt $i/25 got HTTP $code; sleeping 2s..."
+            sleep 2
+          done
+
+          if [[ "$ok" -ne 1 ]]; then
+            echo "Web check failed after retries. Dumping logs:"
+            docker compose -f "$BASE_DIR/compose.yml" logs --no-color --tail=300 web || true
+            exit 1
+          fi
+
+          echo "Smoke test passed."
 
   notify-slack:
     name: notify-slack / send
