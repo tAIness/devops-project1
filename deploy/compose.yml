@@ -11,31 +11,41 @@ services:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 3s
-      retries: 10
+      retries: 20
 
   app:
     image: ${IMAGE_REPO_APP}:${TAG}
     environment:
       # IMPORTANT: inside compose network Postgres is always on 5432
       DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}
-      PORT: "${FLASK_PORT:-8000}"     # <- use FLASK_PORT, default 8000 if missing
+      PORT: "8000"
     depends_on:
       db:
         condition: service_healthy
-    expose:
-      - "8000"
+    ports:
+      - "${FLASK_PORT:-8000}:8000"
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1:8000/health >/dev/null || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
 
   web:
     image: ${IMAGE_REPO_WEB}:${TAG}
-    ports:
-      - "${WEB_PORT:-80}:80"
     depends_on:
       app:
         condition: service_healthy
+    ports:
+      - "${WEB_PORT:-8082}:80"
     volumes:
       - ./content/images:/usr/share/nginx/html/images:ro
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://127.0.0.1/ >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 3s
+      retries: 30
 
 volumes:
   supermario_db_data:
-    name: supermario_db_data           # <— fixed global name
-    external: true                     # <— don’t let Compose delete/recreate it
+    name: supermario_db_data
+    external: true
