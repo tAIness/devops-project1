@@ -327,7 +327,7 @@ jobs:
 
           docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 
-      - name: Smoke test
+      - name: Smoke Test
         shell: bash
         run: |
           set -euo pipefail
