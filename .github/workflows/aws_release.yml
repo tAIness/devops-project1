@@ -5,13 +5,13 @@ name: Release_AWS
 on:
   push:
     branches: [main]
-    tags: ["v*.*.*"]
+    tags: ['v*.*.*']
   workflow_dispatch:
     inputs:
-      runner:
-        description: "Where to run deploy (self-hosted runner labels). ec2=deploy on EC2 runner, kubernetes=k8s runner, mac=local mac runner"
+      target:
+        description: "Deploy target (ec2=docker compose on EC2 self-hosted runner)"
         type: choice
-        options: [ ec2, kubernetes, mac ]
+        options: [ ec2 ]
         default: ec2
 
 permissions:
@@ -30,30 +30,20 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  resolve-runner:
-    name: Resolve self-hosted runner labels
+  resolve-target:
+    name: Resolve deploy target
     runs-on: ubuntu-latest
     outputs:
-      deploy_runner: ${{ steps.out.outputs.deploy_runner }}
+      target: ${{ steps.out.outputs.target }}
     steps:
       - id: out
         shell: bash
         run: |
-          set -euo pipefail
-          # Priority: workflow input -> repo variable -> default
-          in="${{ inputs.runner }}"
-          var="${{ vars.RUNNER_TARGET }}"
+          in="${{ inputs.target }}"
+          var="${{ vars.DEPLOY_TARGET }}"
           tgt="${in:-${var:-ec2}}"
-
-          case "$tgt" in
-            ec2)        labels='["self-hosted","ec2"]' ;;
-            kubernetes) labels='["self-hosted","kubernetes"]' ;;
-            mac)        labels='["self-hosted","macOS"]' ;;
-            *)          labels='["self-hosted","ec2"]' ;;
-          esac
-
-          echo "deploy_runner=$labels" >> "$GITHUB_OUTPUT"
-          echo "Resolved deploy runner: $labels"
+          echo "target=$tgt" >> "$GITHUB_OUTPUT"
+          echo "Deploy target resolved to: $tgt"
 
   compute-tag:
     name: Compute next tag (when pushing to main)
@@ -81,7 +71,6 @@ jobs:
             patch=$((10#$patch + 1))
           fi
           echo "tag=v${major}.${minor}.${patch}" >> "$GITHUB_OUTPUT"
-          echo "Next tag: v${major}.${minor}.${patch}"
 
   setup:
     name: Resolve image tag
@@ -202,18 +191,18 @@ jobs:
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
 
-      # IMPORTANT: disable gha cache to avoid the "<h2>Our services aren't available right now</h2>" cache endpoint failures
-      - name: Build & push app to ECR (no GHA cache)
+      - name: Build & push app to ECR
         uses: docker/build-push-action@v6
         with:
           context: ./app
           platforms: linux/amd64
           push: true
+          # IMPORTANT: disable GHA cache to avoid "Our services aren't available right now" failures
+          # cache-from: type=gha
+          # cache-to: type=gha,mode=max
           tags: |
-            ${{ env.AWS_ECR_REGISTRY }}/${{ env.AWS_ECR_REPO_APP }}:${{ env.IMAGE_TAG }}
-            ${{ env.AWS_ECR_REGISTRY }}/${{ env.AWS_ECR_REPO_APP }}:latest
-          cache-from: ""
-          cache-to: ""
+            ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_APP }}:${{ needs.setup.outputs.IMAGE_TAG }}
+            ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_APP }}:latest
 
   build-and-push-web:
     name: Build & push web image (ECR)
@@ -237,29 +226,28 @@ jobs:
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
 
-      - name: Build & push web to ECR (no GHA cache)
+      - name: Build & push web to ECR
         uses: docker/build-push-action@v6
         with:
           context: ./web
           platforms: linux/amd64
           push: true
+          # IMPORTANT: disable GHA cache to avoid "Our services aren't available right now" failures
+          # cache-from: type=gha
+          # cache-to: type=gha,mode=max
           tags: |
-            ${{ env.AWS_ECR_REGISTRY }}/${{ env.AWS_ECR_REPO_WEB }}:${{ env.IMAGE_TAG }}
-            ${{ env.AWS_ECR_REGISTRY }}/${{ env.AWS_ECR_REPO_WEB }}:latest
-          cache-from: ""
-          cache-to: ""
+            ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_WEB }}:${{ needs.setup.outputs.IMAGE_TAG }}
+            ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_WEB }}:latest
 
   deploy-ec2:
     name: Deploy to EC2 (Docker Compose from ECR) - SELF HOSTED
-    needs: [resolve-runner, setup, build-and-push-app, build-and-push-web, create-tag]
-    if: ${{ github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/') }}
-    runs-on: ${{ fromJson(needs.resolve-runner.outputs.deploy_runner) }}
+    runs-on: [self-hosted, ec2]
+    needs: [resolve-target, setup, build-and-push-app, build-and-push-web, create-tag]
+    if: ${{ needs.resolve-target.outputs.target == 'ec2' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
     env:
       TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
       AWS_REGION: ${{ vars.AWS_REGION }}
       AWS_ECR_REGISTRY: ${{ vars.AWS_ECR_REGISTRY }}
-      AWS_ECR_REPO_APP: ${{ vars.AWS_ECR_REPO_APP }}
-      AWS_ECR_REPO_WEB: ${{ vars.AWS_ECR_REPO_WEB }}
       APP_IMAGE: ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_APP }}
       WEB_IMAGE: ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_WEB }}
       DB_NAME: ${{ vars.DB_NAME }}
@@ -271,21 +259,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Show runner identity
-        shell: bash
-        run: |
-          set -euo pipefail
-          echo "Runner labels: ${{ needs.resolve-runner.outputs.deploy_runner }}"
-          whoami || true
-          uname -a || true
-          docker version || true
-          docker compose version || true
-
       - name: Configure AWS credentials (OIDC role)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - name: Login to ECR
         shell: bash
@@ -294,18 +272,21 @@ jobs:
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
 
-      - name: Write /srv/supermario/.env for compose
+      # ✅ Quick fix: write under $HOME (owned by ghrunner) and NO sudo
+      - name: Write .env for compose (no sudo)
         shell: bash
         run: |
           set -euo pipefail
-          sudo mkdir -p /srv/supermario
+
+          BASE_DIR="$HOME/supermario"
+          mkdir -p "$BASE_DIR"
 
           # Default ports if repo vars are empty
           DBP="${DB_PORT:-5432}"
           APIP="${FLASK_PORT:-8000}"
           WEBP="${WEB_PORT:-8082}"
 
-          sudo tee /srv/supermario/.env >/dev/null <<EOF
+          cat > "$BASE_DIR/.env" <<EOF
           APP_IMAGE=${APP_IMAGE}
           WEB_IMAGE=${WEB_IMAGE}
           TAG=${TAG}
@@ -317,29 +298,31 @@ jobs:
           WEB_PORT=${WEBP}
           EOF
 
-          sudo chmod 600 /srv/supermario/.env
-          echo "Wrote /srv/supermario/.env"
+          chmod 600 "$BASE_DIR/.env"
+          echo "Wrote $BASE_DIR/.env"
 
-      - name: Copy docker compose file to /srv/supermario
+      - name: Copy docker compose file (no sudo)
         shell: bash
         run: |
           set -euo pipefail
-          sudo mkdir -p /srv/supermario
-          sudo cp -f deploy/compose.yml /srv/supermario/compose.yml
+          BASE_DIR="$HOME/supermario"
+          mkdir -p "$BASE_DIR"
+          cp -f deploy/compose.yml "$BASE_DIR/compose.yml"
 
-      - name: Deploy with docker compose
+      - name: Deploy with docker compose (no sudo)
         shell: bash
         run: |
           set -euo pipefail
-          cd /srv/supermario
+          BASE_DIR="$HOME/supermario"
+          cd "$BASE_DIR"
 
-          sudo docker pull "${APP_IMAGE}:${TAG}"
-          sudo docker pull "${WEB_IMAGE}:${TAG}"
+          docker pull "${APP_IMAGE}:${TAG}"
+          docker pull "${WEB_IMAGE}:${TAG}"
 
-          sudo docker volume create supermario_db_data >/dev/null 2>&1 || true
+          docker volume create supermario_db_data >/dev/null 2>&1 || true
 
-          sudo docker compose --env-file .env -f compose.yml up -d --no-build
-          sudo docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+          docker compose --env-file .env -f compose.yml up -d --no-build
+          docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 
       - name: Smoke test
         shell: bash
@@ -347,54 +330,22 @@ jobs:
           set -euo pipefail
           APIP="${FLASK_PORT:-8000}"
           WEBP="${WEB_PORT:-8082}"
-          curl -sf "http://127.0.0.1:${APIP}/health" >/dev/null
+          curl -sf "http://127.0.0.1:${APIP}/health" || (docker logs app || true; exit 1)
           curl -sI "http://127.0.0.1:${WEBP}" | grep -q "200 OK"
-          echo "Smoke tests OK"
-
-  slack-message:
-    name: Build Slack message
-    if: ${{ always() }}
-    runs-on: ubuntu-latest
-    needs:
-      - resolve-runner
-      - setup
-      - build-and-push-app
-      - build-and-push-web
-      - deploy-ec2
-    outputs:
-      msg: ${{ steps.msg.outputs.msg }}
-      status: ${{ steps.msg.outputs.status }}
-    steps:
-      - id: msg
-        shell: bash
-        run: |
-          set -euo pipefail
-          runner_json='${{ needs.resolve-runner.outputs.deploy_runner }}'
-          tag='${{ needs.setup.outputs.IMAGE_TAG }}'
-          bapp='${{ needs.build-and-push-app.result }}'
-          bweb='${{ needs.build-and-push-web.result }}'
-          dep='${{ needs.deploy-ec2.result }}'
-
-          if [[ "$bapp" == "failure" || "$bweb" == "failure" || "$dep" == "failure" ]]; then
-            st="failure"
-          else
-            st="success"
-          fi
-
-          echo "status=$st" >> "$GITHUB_OUTPUT"
-          echo "msg=deploy_runner=${runner_json} · tag=${tag} · build_app=${bapp} · build_web=${bweb} · deploy=${dep}" >> "$GITHUB_OUTPUT"
 
   notify-slack:
     name: notify-slack / send
     if: ${{ always() }}
     needs:
       - setup
-      - slack-message
+      - build-and-push-app
+      - build-and-push-web
+      - deploy-ec2
     uses: tAIness/devops-ci-lib/.github/workflows/slack-notify.yml@main
     secrets: inherit
     with:
-      title: "Release_AWS: ${{ needs.setup.outputs.IMAGE_TAG }}"
-      status: ${{ needs.slack-message.outputs.status }}
-      message: ${{ needs.slack-message.outputs.msg }}
+      title: "Release_AWS: ${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
+      status: ${{ (needs['build-and-push-app'].result == 'failure' || needs['build-and-push-web'].result == 'failure' || needs['deploy-ec2'].result == 'failure') && 'failure' || 'success' }}
+      message: "target=ec2 · tag=${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
       only_on: "always"
       run_url: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
