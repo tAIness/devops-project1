@@ -5,18 +5,18 @@ name: Release_AWS
 on:
   push:
     branches: [main]
-    tags: ['v*.*.*']
+    tags: ["v*.*.*"]
   workflow_dispatch:
     inputs:
-      target:
-        description: "Deploy target (ec2=docker compose on EC2)"
-        type: choice
-        options: [ ec2 ]
-        default: ec2
       runner:
-        description: "Where to run build/push jobs (github=ubuntu-latest, ec2=self-hosted runner)"
+        description: "Where to run the workflow jobs"
         type: choice
-        options: [ github, ec2 ]
+        options: [github, ec2]
+        default: ec2
+      deploy_target:
+        description: "Deploy target (for this assignment we deploy on EC2 docker-compose)"
+        type: choice
+        options: [ec2]
         default: ec2
 
 permissions:
@@ -35,42 +35,38 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  resolve-target:
-    name: Resolve deploy target
+  # ------------------------------------------------------------
+  # Resolve runner + deploy target (inputs > vars > defaults)
+  # ------------------------------------------------------------
+  resolve:
+    name: Resolve runner & deploy target
     runs-on: ubuntu-latest
     outputs:
-      target: ${{ steps.out.outputs.target }}
+      runner: ${{ steps.out.outputs.runner }}
+      deploy_target: ${{ steps.out.outputs.deploy_target }}
     steps:
       - id: out
         shell: bash
         run: |
-          in="${{ inputs.target }}"
-          var="${{ vars.DEPLOY_TARGET }}"
-          tgt="${in:-${var:-ec2}}"
-          echo "target=$tgt" >> "$GITHUB_OUTPUT"
-          echo "Deploy target resolved to: $tgt"
+          set -euo pipefail
 
-  resolve-runner:
-    name: Resolve runner (github/ec2)
-    runs-on: ubuntu-latest
-    outputs:
-      runs_on_json: ${{ steps.out.outputs.runs_on_json }}
-      runner_choice: ${{ steps.out.outputs.runner_choice }}
-    steps:
-      - id: out
-        shell: bash
-        run: |
-          choice="${{ inputs.runner }}"
-          if [[ -z "$choice" ]]; then choice="ec2"; fi
+          in_runner="${{ inputs.runner }}"
+          var_runner="${{ vars.RELEASE_RUNNER }}"
+          runner="${in_runner:-${var_runner:-ec2}}"
 
-          if [[ "$choice" == "ec2" ]]; then
-            echo 'runs_on_json=["self-hosted","ec2"]' >> "$GITHUB_OUTPUT"
-          else
-            echo 'runs_on_json=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
-          fi
-          echo "runner_choice=$choice" >> "$GITHUB_OUTPUT"
-          echo "Runner resolved to: $choice"
+          in_target="${{ inputs.deploy_target }}"
+          var_target="${{ vars.DEPLOY_TARGET }}"
+          deploy_target="${in_target:-${var_target:-ec2}}"
 
+          echo "runner=$runner" >> "$GITHUB_OUTPUT"
+          echo "deploy_target=$deploy_target" >> "$GITHUB_OUTPUT"
+
+          echo "Resolved runner=$runner"
+          echo "Resolved deploy_target=$deploy_target"
+
+  # ------------------------------------------------------------
+  # Compute next tag on main branch pushes (if not pushing a tag)
+  # ------------------------------------------------------------
   compute-tag:
     name: Compute next tag (when pushing to main)
     runs-on: ubuntu-latest
@@ -80,13 +76,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { fetch-depth: 0 }
-      - name: Compute next tag (no create)
+
+      - name: Compute next semver tag (patch bump)
         id: bump
         shell: bash
         run: |
           set -euo pipefail
           git fetch --tags --force
-          last="$(git tag -l 'v*.*.*' | sort -V | tail -n1 || true)"
+
+          last="$(git tag -l 'v*.*.*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)"
           if [[ -z "$last" ]]; then
             major=1 minor=0 patch=1
           else
@@ -94,8 +92,13 @@ jobs:
             major="$vM"; minor="$vN"; patch="$vP"
             patch=$((10#$patch + 1))
           fi
-          echo "tag=v${major}.${minor}.${patch}" >> "$GITHUB_OUTPUT"
 
+          echo "tag=v${major}.${minor}.${patch}" >> "$GITHUB_OUTPUT"
+          echo "Next tag: v${major}.${minor}.${patch}"
+
+  # ------------------------------------------------------------
+  # Resolve IMAGE_TAG: pushed tag or computed tag
+  # ------------------------------------------------------------
   setup:
     name: Resolve image tag
     runs-on: ubuntu-latest
@@ -109,28 +112,80 @@ jobs:
           set -euo pipefail
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
             echo "IMAGE_TAG=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            echo "Using pushed tag: ${{ github.ref_name }}"
           else
             echo "IMAGE_TAG=${{ needs.compute-tag.outputs.tag }}" >> "$GITHUB_OUTPUT"
+            echo "Using computed tag: ${{ needs.compute-tag.outputs.tag }}"
           fi
 
+  # ------------------------------------------------------------
+  # Optional: Create tag on main pushes (branch builds)
+  # ------------------------------------------------------------
+  create-tag:
+    name: Create & push git tag (main pushes)
+    runs-on: ubuntu-latest
+    needs: [compute-tag]
+    if: ${{ github.ref_type == 'branch' && github.ref_name == 'main' }}
+    env:
+      TAG: ${{ needs.compute-tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - name: Configure git identity
+        run: |
+          git config user.name  "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+      - name: Tag & push
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch --all --tags
+          git checkout main
+          git pull --ff-only
+          if git rev-parse "$TAG" >/dev/null 2>&1; then
+            echo "Tag $TAG already exists; skipping."
+          else
+            git tag -a "$TAG" -m "Release $TAG"
+            git push origin "$TAG"
+          fi
+
+  # ------------------------------------------------------------
+  # Build & push APP image (ECR)
+  # Runner selectable: GitHub-hosted or EC2 self-hosted
+  # ------------------------------------------------------------
   build-and-push-app:
     name: Build & push app image (ECR)
-    runs-on: ${{ fromJSON(needs.resolve-runner.outputs.runs_on_json) }}
-    needs: [setup, resolve-runner]
+    needs: [resolve, setup]
+    runs-on: ${{ needs.resolve.outputs.runner == 'ec2' && fromJSON('["self-hosted","ec2"]') || 'ubuntu-latest' }}
     env:
       IMAGE_TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Show runner evidence (for assignment)
+        shell: bash
+        run: |
+          echo "RUNNER_NAME=$RUNNER_NAME"
+          echo "RUNNER_OS=$RUNNER_OS"
+          echo "RUNNER_ARCH=$RUNNER_ARCH"
+          echo "RUNNER_LABELS=$RUNNER_LABELS"
+          uname -a || true
+          curl -s http://169.254.169.254/latest/meta-data/instance-id || true
+
       - name: Configure AWS credentials (OIDC role)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+
       - uses: docker/setup-buildx-action@v3
+
       - name: Login to Amazon ECR
+        shell: bash
         run: |
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
+
       - name: Build & push app to ECR
         uses: docker/build-push-action@v6
         with:
@@ -138,27 +193,48 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_APP }}:${{ env.IMAGE_TAG }}
-            ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_APP }}:latest
+            ${{ env.AWS_ECR_REGISTRY }}/${{ env.AWS_ECR_REPO_APP }}:${{ env.IMAGE_TAG }}
+            ${{ env.AWS_ECR_REGISTRY }}/${{ env.AWS_ECR_REPO_APP }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
+  # ------------------------------------------------------------
+  # Build & push WEB image (ECR)
+  # Runner selectable: GitHub-hosted or EC2 self-hosted
+  # ------------------------------------------------------------
   build-and-push-web:
     name: Build & push web image (ECR)
-    runs-on: ${{ fromJSON(needs.resolve-runner.outputs.runs_on_json) }}
-    needs: [setup, resolve-runner]
+    needs: [resolve, setup]
+    runs-on: ${{ needs.resolve.outputs.runner == 'ec2' && fromJSON('["self-hosted","ec2"]') || 'ubuntu-latest' }}
     env:
       IMAGE_TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Show runner evidence (for assignment)
+        shell: bash
+        run: |
+          echo "RUNNER_NAME=$RUNNER_NAME"
+          echo "RUNNER_OS=$RUNNER_OS"
+          echo "RUNNER_ARCH=$RUNNER_ARCH"
+          echo "RUNNER_LABELS=$RUNNER_LABELS"
+          uname -a || true
+          curl -s http://169.254.169.254/latest/meta-data/instance-id || true
+
       - name: Configure AWS credentials (OIDC role)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
+
       - uses: docker/setup-buildx-action@v3
+
       - name: Login to Amazon ECR
+        shell: bash
         run: |
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
+
       - name: Build & push web to ECR
         uses: docker/build-push-action@v6
         with:
@@ -166,20 +242,33 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_WEB }}:${{ env.IMAGE_TAG }}
-            ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_WEB }}:latest
+            ${{ env.AWS_ECR_REGISTRY }}/${{ env.AWS_ECR_REPO_WEB }}:${{ env.IMAGE_TAG }}
+            ${{ env.AWS_ECR_REGISTRY }}/${{ env.AWS_ECR_REPO_WEB }}:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
+  # ------------------------------------------------------------
+  # Deploy on EC2 with Docker Compose (must run on EC2 runner)
+  # ------------------------------------------------------------
   deploy-ec2:
     name: Deploy to EC2 (Docker Compose from ECR)
+    needs: [resolve, setup, build-and-push-app, build-and-push-web, create-tag]
     runs-on: [self-hosted, ec2]
-    needs: [resolve-target, setup, build-and-push-app, build-and-push-web]
-    if: ${{ needs.resolve-target.outputs.target == 'ec2' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
+    if: ${{ needs.resolve.outputs.deploy_target == 'ec2' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
     env:
       TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
       APP_IMAGE: ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_APP }}
       WEB_IMAGE: ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_WEB }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Show runner evidence (for assignment)
+        shell: bash
+        run: |
+          echo "RUNNER_NAME=$RUNNER_NAME"
+          echo "RUNNER_LABELS=$RUNNER_LABELS"
+          echo "Instance ID (should work on EC2):"
+          curl -s http://169.254.169.254/latest/meta-data/instance-id || true
 
       - name: Configure AWS credentials (OIDC role)
         uses: aws-actions/configure-aws-credentials@v4
@@ -193,14 +282,16 @@ jobs:
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
 
-      - name: Deploy with docker compose (pull from ECR)
+      - name: Prepare /srv/supermario (env + compose)
         shell: bash
         run: |
           set -euo pipefail
           sudo mkdir -p /srv/supermario
-          sudo cp -f deploy/compose.yml /srv/supermario/compose.yml
+          sudo chown -R "$(id -u):$(id -g)" /srv/supermario
 
-          sudo tee /srv/supermario/.env >/dev/null <<EOF
+          cp -f deploy/compose.yml /srv/supermario/compose.yml
+
+          cat > /srv/supermario/.env <<EOF
           APP_IMAGE=${APP_IMAGE}
           WEB_IMAGE=${WEB_IMAGE}
           TAG=${TAG}
@@ -212,26 +303,42 @@ jobs:
           WEB_PORT=${{ vars.WEB_PORT || '8082' }}
           EOF
 
+          echo "Wrote /srv/supermario/.env"
+
+      - name: Deploy with docker compose (pull from ECR)
+        shell: bash
+        run: |
+          set -euo pipefail
           cd /srv/supermario
-          sudo docker pull "${APP_IMAGE}:${TAG}"
-          sudo docker pull "${WEB_IMAGE}:${TAG}"
-          sudo docker volume create supermario_db_data >/dev/null 2>&1 || true
-          sudo docker compose --env-file .env -f compose.yml up -d --no-build
-          sudo docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
+
+          docker pull "${APP_IMAGE}:${TAG}"
+          docker pull "${WEB_IMAGE}:${TAG}"
+
+          docker volume create supermario_db_data >/dev/null 2>&1 || true
+
+          docker compose --env-file .env -f compose.yml up -d --no-build
+          docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 
       - name: Smoke test
         shell: bash
         run: |
           set -euo pipefail
-          curl -sf "http://127.0.0.1:${{ vars.FLASK_PORT || '8000' }}/health" >/dev/null
-          curl -sI "http://127.0.0.1:${{ vars.WEB_PORT || '8082' }}" | grep -q "200 OK"
+          FLASK_PORT="${{ vars.FLASK_PORT || '8000' }}"
+          WEB_PORT="${{ vars.WEB_PORT || '8082' }}"
 
+          curl -sf "http://127.0.0.1:${FLASK_PORT}/health" || (docker logs app || true; exit 1)
+          curl -sI "http://127.0.0.1:${WEB_PORT}" | grep -q "200 OK"
+          echo "Smoke tests OK."
+
+  # ------------------------------------------------------------
+  # Slack notification (always)
+  # ------------------------------------------------------------
   notify-slack:
     name: notify-slack / send
     if: ${{ always() }}
     needs:
+      - resolve
       - setup
-      - resolve-runner
       - build-and-push-app
       - build-and-push-web
       - deploy-ec2
@@ -240,6 +347,6 @@ jobs:
     with:
       title: "Release_AWS: ${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
       status: ${{ (needs['build-and-push-app'].result == 'failure' || needs['build-and-push-web'].result == 'failure' || needs['deploy-ec2'].result == 'failure') && 'failure' || 'success' }}
-      message: "runner=${{ needs.resolve-runner.outputs.runner_choice }} · target=ec2 · tag=${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
+      message: "runner=${{ needs.resolve.outputs.runner }} · target=${{ needs.resolve.outputs.deploy_target }} · tag=${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
       only_on: "always"
       run_url: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
