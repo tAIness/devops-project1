@@ -3,7 +3,7 @@ global:
   argoNamespace: argocd
   repoURL: https://github.com/tAIness/devops-project1.git
   targetRevision: main
-  releaseTag: "v1.0.246"
+  releaseTag: "v1.0.247"
 project:
   enabled: false
   name: default
