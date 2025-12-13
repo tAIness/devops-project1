@@ -316,7 +316,7 @@ jobs:
             exit 1
           fi
 
-      - name: Write .env for compose
+      - name: Write .env for compose (no heredoc to avoid YAML issues)
         shell: bash
         run: |
           set -euo pipefail
@@ -327,17 +327,17 @@ jobs:
           APIP="${FLASK_PORT:-8000}"
           WEBP="${WEB_PORT:-8082}"
 
-          cat > "$BASE_DIR/.env" <<EOF
-          IMAGE_REPO_APP=${IMAGE_REPO_APP}
-          IMAGE_REPO_WEB=${IMAGE_REPO_WEB}
-          TAG=${TAG}
-          DB_NAME=${DB_NAME}
-          DB_USER=${DB_USER}
-          DB_PASSWORD=${DB_PASSWORD}
-          DB_PORT=${DBP}
-          FLASK_PORT=${APIP}
-          WEB_PORT=${WEBP}
-          EOF
+          {
+            echo "IMAGE_REPO_APP=${IMAGE_REPO_APP}"
+            echo "IMAGE_REPO_WEB=${IMAGE_REPO_WEB}"
+            echo "TAG=${TAG}"
+            echo "DB_NAME=${DB_NAME}"
+            echo "DB_USER=${DB_USER}"
+            echo "DB_PASSWORD=${DB_PASSWORD}"
+            echo "DB_PORT=${DBP}"
+            echo "FLASK_PORT=${APIP}"
+            echo "WEB_PORT=${WEBP}"
+          } > "$BASE_DIR/.env"
 
           chmod 600 "$BASE_DIR/.env"
           echo "Wrote $BASE_DIR/.env"
@@ -397,11 +397,10 @@ jobs:
             echo "App health failed. Dumping logs:"
             $COMPOSE -f "$BASE_DIR/compose.yml" logs --no-color --tail=300 app || true
             $COMPOSE -f "$BASE_DIR/compose.yml" logs --no-color --tail=300 db || true
-            docker ps --format 'table {{.Names}}\t{{.Ports}}\t{{.Status}}'
             exit 1
           fi
 
-          echo "Waiting for web on http://127.0.0.1:${WEBP} ..."
+          echo "Waiting for web on http://127.0.0.1:${WEBP}/ ..."
           ok=0
           for i in {1..25}; do
             code="$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${WEBP}/" || true)"
@@ -416,7 +415,6 @@ jobs:
           if [[ "$ok" -ne 1 ]]; then
             echo "Web check failed. Dumping logs:"
             $COMPOSE -f "$BASE_DIR/compose.yml" logs --no-color --tail=300 web || true
-            docker ps --format 'table {{.Names}}\t{{.Ports}}\t{{.Status}}'
             exit 1
           fi
 
