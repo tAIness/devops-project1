@@ -102,7 +102,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          tag="${{ needs['compute-tag'].outputs.tag }}"
+          tag="${{ needs.compute-tag.outputs.tag }}"
 
           # Fallback safety
           if [[ -z "${tag}" ]]; then
@@ -118,7 +118,7 @@ jobs:
     needs: [compute-tag]
     if: ${{ github.ref_type == 'branch' && github.ref_name == 'main' }}
     env:
-      TAG: ${{ needs['compute-tag'].outputs.tag }}
+      TAG: ${{ needs.compute-tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -172,7 +172,7 @@ jobs:
     needs: [compute-tag, bump-helm-appversion]
     if: ${{ github.ref_type == 'branch' && github.ref_name == 'main' }}
     env:
-      TAG: ${{ needs['compute-tag'].outputs.tag }}
+      TAG: ${{ needs.compute-tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -201,7 +201,7 @@ jobs:
 
   build-and-push-app:
     name: Build & push app image (ECR)
-    runs-on: ${{ fromJSON(needs['resolve-runner'].outputs.build_runs_on) }}
+    runs-on: ${{ fromJSON(needs.resolve-runner.outputs.build_runs_on) }}
     needs: [resolve-runner, setup]
     steps:
       - uses: actions/checkout@v4
@@ -233,7 +233,7 @@ jobs:
 
   build-and-push-web:
     name: Build & push web image (ECR)
-    runs-on: ${{ fromJSON(needs['resolve-runner'].outputs.build_runs_on) }}
+    runs-on: ${{ fromJSON(needs.resolve-runner.outputs.build_runs_on) }}
     needs: [resolve-runner, setup]
     steps:
       - uses: actions/checkout@v4
@@ -328,16 +328,16 @@ jobs:
           WEBP="${WEB_PORT:-8082}"
 
           cat > "$BASE_DIR/.env" <<EOF
-IMAGE_REPO_APP=${IMAGE_REPO_APP}
-IMAGE_REPO_WEB=${IMAGE_REPO_WEB}
-TAG=${TAG}
-DB_NAME=${DB_NAME}
-DB_USER=${DB_USER}
-DB_PASSWORD=${DB_PASSWORD}
-DB_PORT=${DBP}
-FLASK_PORT=${APIP}
-WEB_PORT=${WEBP}
-EOF
+          IMAGE_REPO_APP=${IMAGE_REPO_APP}
+          IMAGE_REPO_WEB=${IMAGE_REPO_WEB}
+          TAG=${TAG}
+          DB_NAME=${DB_NAME}
+          DB_USER=${DB_USER}
+          DB_PASSWORD=${DB_PASSWORD}
+          DB_PORT=${DBP}
+          FLASK_PORT=${APIP}
+          WEB_PORT=${WEBP}
+          EOF
 
           chmod 600 "$BASE_DIR/.env"
           echo "Wrote $BASE_DIR/.env"
@@ -431,7 +431,7 @@ EOF
     secrets: inherit
     with:
       title: Release_AWS
-      status: ${{ (needs['build-and-push-app'].result == 'failure' || needs['build-and-push-web'].result == 'failure' || needs['deploy-ec2'].result == 'failure') && 'failure' || 'success' }}
+      status: ${{ (needs.build-and-push-app.result == 'failure' || needs.build-and-push-web.result == 'failure' || needs.deploy-ec2.result == 'failure') && 'failure' || 'success' }}
       message: deploy=ec2 tag=${{ needs.setup.outputs.SLACK_TAG }}
       only_on: always
       run_url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
