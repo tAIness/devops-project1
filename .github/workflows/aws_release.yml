@@ -61,7 +61,6 @@ jobs:
         shell: bash
         run: |
           choice="${{ inputs.runner }}"
-          # default for push events (no workflow_dispatch inputs):
           if [[ -z "$choice" ]]; then choice="ec2"; fi
 
           if [[ "$choice" == "ec2" ]]; then
@@ -114,76 +113,6 @@ jobs:
             echo "IMAGE_TAG=${{ needs.compute-tag.outputs.tag }}" >> "$GITHUB_OUTPUT"
           fi
 
-  bump-helm-appversion:
-    name: Bump Helm appVersion in all charts & push
-    runs-on: ubuntu-latest
-    needs: [compute-tag]
-    if: ${{ github.ref_type == 'branch' && github.ref_name == 'main' }}
-    env:
-      TAG: ${{ needs.compute-tag.outputs.tag }}
-    steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - name: Install yq (static)
-        run: |
-          set -euo pipefail
-          YQ_VERSION=v4.44.3
-          OS=$(uname); ARCH=$(uname -m)
-          case "$ARCH" in x86_64) ARCH=amd64 ;; aarch64|arm64) ARCH=arm64 ;; esac
-          curl -fsSL -o /usr/local/bin/yq \
-            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_${OS}_${ARCH}"
-          chmod +x /usr/local/bin/yq
-      - name: Update appVersion for ALL charts + write releaseTag
-        shell: bash
-        run: |
-          set -euo pipefail
-          mapfile -t charts < <(git ls-files 'infra/helm/**/Chart.yaml')
-          (( ${#charts[@]} )) || { echo "No Chart.yaml under infra/helm"; exit 1; }
-          for f in "${charts[@]}"; do
-            yq -i '.appVersion = env(TAG)' "$f"
-          done
-          yq -i '.global.releaseTag = env(TAG)' infra/helm/argocd-apps/values.yaml
-      - name: Commit & push change
-        run: |
-          set -euo pipefail
-          git config user.name  "github-actions"
-          git config user.email "github-actions@users.noreply.github.com"
-          if git diff --quiet; then
-            echo "No changes to commit."
-          else
-            git add infra/helm/**/Chart.yaml infra/helm/argocd-apps/values.yaml
-            git commit -m "chore(helm): set appVersion & releaseTag ${TAG}"
-            git push origin HEAD:main
-          fi
-
-  create-tag:
-    name: Create & push git tag
-    runs-on: ubuntu-latest
-    needs: [compute-tag, bump-helm-appversion]
-    if: ${{ github.ref_type == 'branch' && github.ref_name == 'main' }}
-    env:
-      TAG: ${{ needs.compute-tag.outputs.tag }}
-    steps:
-      - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
-      - name: Configure git identity
-        run: |
-          git config user.name  "github-actions"
-          git config user.email "github-actions@users.noreply.github.com"
-      - name: Tag & push
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch --all --tags
-          git checkout main
-          git pull --ff-only
-          if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists; skipping create."
-          else
-            git tag -a "$TAG" -m "Release $TAG"
-            git push origin "$TAG"
-          fi
-
   build-and-push-app:
     name: Build & push app image (ECR)
     runs-on: ${{ fromJSON(needs.resolve-runner.outputs.runs_on_json) }}
@@ -209,8 +138,8 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.AWS_ECR_REGISTRY }}/${{ env.AWS_ECR_REPO_APP }}:${{ env.IMAGE_TAG }}
-            ${{ env.AWS_ECR_REGISTRY }}/${{ env.AWS_ECR_REPO_APP }}:latest
+            ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_APP }}:${{ env.IMAGE_TAG }}
+            ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_APP }}:latest
 
   build-and-push-web:
     name: Build & push web image (ECR)
@@ -237,20 +166,21 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.AWS_ECR_REGISTRY }}/${{ env.AWS_ECR_REPO_WEB }}:${{ env.IMAGE_TAG }}
-            ${{ env.AWS_ECR_REGISTRY }}/${{ env.AWS_ECR_REPO_WEB }}:latest
+            ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_WEB }}:${{ env.IMAGE_TAG }}
+            ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_WEB }}:latest
 
   deploy-ec2:
     name: Deploy to EC2 (Docker Compose from ECR)
     runs-on: [self-hosted, ec2]
-    needs: [resolve-target, setup, build-and-push-app, build-and-push-web, create-tag]
+    needs: [resolve-target, setup, build-and-push-app, build-and-push-web]
     if: ${{ needs.resolve-target.outputs.target == 'ec2' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
     env:
       TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
-      APP_IMAGE: ${{ env.AWS_ECR_REGISTRY }}/${{ env.AWS_ECR_REPO_APP }}
-      WEB_IMAGE: ${{ env.AWS_ECR_REGISTRY }}/${{ env.AWS_ECR_REPO_WEB }}
+      APP_IMAGE: ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_APP }}
+      WEB_IMAGE: ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_WEB }}
     steps:
       - uses: actions/checkout@v4
+
       - name: Configure AWS credentials (OIDC role)
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -263,11 +193,13 @@ jobs:
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
 
-      - name: Write .env + copy compose + deploy
+      - name: Deploy with docker compose (pull from ECR)
         shell: bash
         run: |
           set -euo pipefail
           sudo mkdir -p /srv/supermario
+          sudo cp -f deploy/compose.yml /srv/supermario/compose.yml
+
           sudo tee /srv/supermario/.env >/dev/null <<EOF
           APP_IMAGE=${APP_IMAGE}
           WEB_IMAGE=${WEB_IMAGE}
@@ -280,9 +212,7 @@ jobs:
           WEB_PORT=${{ vars.WEB_PORT || '8082' }}
           EOF
 
-          sudo cp -f deploy/compose.yml /srv/supermario/compose.yml
           cd /srv/supermario
-
           sudo docker pull "${APP_IMAGE}:${TAG}"
           sudo docker pull "${WEB_IMAGE}:${TAG}"
           sudo docker volume create supermario_db_data >/dev/null 2>&1 || true
