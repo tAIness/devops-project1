@@ -29,7 +29,6 @@ env:
   AWS_ECR_REPO_APP: ${{ vars.AWS_ECR_REPO_APP }}
   AWS_ECR_REPO_WEB: ${{ vars.AWS_ECR_REPO_WEB }}
 
-# Keep workflow-level concurrency for builds
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -86,16 +85,26 @@ jobs:
     needs: [compute-tag]
     outputs:
       IMAGE_TAG: ${{ steps.resolve.outputs.IMAGE_TAG }}
+      SLACK_TAG: ${{ steps.resolve.outputs.SLACK_TAG }}
     steps:
       - id: resolve
         shell: bash
         run: |
           set -euo pipefail
+
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            echo "IMAGE_TAG=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
+            tag="${{ github.ref_name }}"
           else
-            echo "IMAGE_TAG=${{ needs.compute-tag.outputs.tag }}" >> "$GITHUB_OUTPUT"
+            tag="${{ needs.compute-tag.outputs.tag }}"
           fi
+
+          # Fallback safety
+          if [[ -z "${tag}" ]]; then
+            tag="${{ github.ref_name }}"
+          fi
+
+          echo "IMAGE_TAG=${tag}" >> "$GITHUB_OUTPUT"
+          echo "SLACK_TAG=${tag}" >> "$GITHUB_OUTPUT"
 
   bump-helm-appversion:
     name: Bump Helm appVersion in all charts & push
@@ -108,6 +117,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - name: Install yq (static)
         run: |
           set -euo pipefail
@@ -120,6 +130,7 @@ jobs:
           curl -fsSL -o /usr/local/bin/yq \
             "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_${OS}_${ARCH}"
           chmod +x /usr/local/bin/yq
+
       - name: Update appVersion for ALL charts + write releaseTag
         shell: bash
         run: |
@@ -130,6 +141,7 @@ jobs:
             yq -i '.appVersion = env(TAG)' "$f"
           done
           yq -i '.global.releaseTag = env(TAG)' infra/helm/argocd-apps/values.yaml
+
       - name: Commit & push change
         run: |
           set -euo pipefail
@@ -178,18 +190,22 @@ jobs:
     needs: [resolve-runner, setup]
     steps:
       - uses: actions/checkout@v4
+
       - name: Configure AWS credentials (OIDC role)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
+
       - uses: docker/setup-buildx-action@v3
+
       - name: Login to Amazon ECR
         shell: bash
         run: |
           set -euo pipefail
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
+
       - name: Build & push app to ECR
         uses: docker/build-push-action@v6
         with:
@@ -206,18 +222,22 @@ jobs:
     needs: [resolve-runner, setup]
     steps:
       - uses: actions/checkout@v4
+
       - name: Configure AWS credentials (OIDC role)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
+
       - uses: docker/setup-buildx-action@v3
+
       - name: Login to Amazon ECR
         shell: bash
         run: |
           set -euo pipefail
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
+
       - name: Build & push web to ECR
         uses: docker/build-push-action@v6
         with:
@@ -231,10 +251,9 @@ jobs:
   deploy-ec2:
     name: Deploy to EC2 (Docker Compose from ECR) - SELF HOSTED
     runs-on: [self-hosted, ec2]
-    needs: [setup, build-and-push-app, build-and-push-web, create-tag]
+    needs: [setup, build-and-push-app, build-and-push-web]
     if: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && (github.event_name != 'workflow_dispatch' || inputs.deploy == true) }}
 
-    # IMPORTANT: don't cancel deploy if a new push happens
     concurrency:
       group: deploy-ec2-${{ github.ref }}
       cancel-in-progress: false
@@ -394,8 +413,8 @@ EOF
     uses: tAIness/devops-ci-lib/.github/workflows/slack-notify.yml@main
     secrets: inherit
     with:
-      title: "Release_AWS: ${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
+      title: Release_AWS
       status: ${{ (needs['build-and-push-app'].result == 'failure' || needs['build-and-push-web'].result == 'failure' || needs['deploy-ec2'].result == 'failure') && 'failure' || 'success' }}
-      message: "deploy=ec2 · tag=${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
-      only_on: "always"
-      run_url: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+      message: deploy=ec2 tag=${{ needs.setup.outputs.SLACK_TAG }}
+      only_on: always
+      run_url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
