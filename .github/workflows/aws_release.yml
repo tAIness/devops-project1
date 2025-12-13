@@ -54,22 +54,34 @@ jobs:
           fi
 
   compute-tag:
-    name: Compute next tag (when pushing to main)
+    name: Compute tag (branch main -> next tag, tag event -> use tag)
     runs-on: ubuntu-latest
-    if: ${{ github.ref_type == 'branch' && github.ref_name == 'main' }}
     outputs:
       tag: ${{ steps.bump.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Compute next tag (no create)
+
+      - name: Compute tag
         id: bump
         shell: bash
         run: |
           set -euo pipefail
+
+          REF_TYPE="${{ github.ref_type }}"
+          REF_NAME="${{ github.ref_name }}"
+
+          # If this workflow was triggered by a tag push, use it as-is.
+          if [[ "$REF_TYPE" == "tag" ]]; then
+            echo "tag=$REF_NAME" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          # Otherwise (main branch push / workflow_dispatch on a branch), compute next patch tag.
           git fetch --tags --force
           last="$(git tag -l 'v*.*.*' | sort -V | tail -n1 || true)"
+
           if [[ -z "$last" ]]; then
             major=1 minor=0 patch=1
           else
@@ -77,6 +89,7 @@ jobs:
             major="$vM"; minor="$vN"; patch="$vP"
             patch=$((10#$patch + 1))
           fi
+
           echo "tag=v${major}.${minor}.${patch}" >> "$GITHUB_OUTPUT"
 
   setup:
@@ -90,23 +103,28 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ "${{ github.ref_type }}" == "tag" ]]; then
-            echo "IMAGE_TAG=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "IMAGE_TAG=${{ needs.compute-tag.outputs.tag }}" >> "$GITHUB_OUTPUT"
-          fi
+          echo "IMAGE_TAG=${{ needs.compute-tag.outputs.tag }}" >> "$GITHUB_OUTPUT"
 
   bump-helm-appversion:
-    name: Bump Helm appVersion in all charts & push
+    name: Bump Helm appVersion in all charts & push (main only; no-op on tags)
     runs-on: ubuntu-latest
     needs: [compute-tag]
-    if: ${{ github.ref_type == 'branch' && github.ref_name == 'main' }}
     env:
       TAG: ${{ needs.compute-tag.outputs.tag }}
     steps:
+      - name: Skip unless main branch push
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.ref_type }}" != "branch" || "${{ github.ref_name }}" != "main" ]]; then
+            echo "Not a main branch push; skipping helm bump."
+            exit 0
+          fi
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - name: Install yq (static)
         run: |
           set -euo pipefail
@@ -119,6 +137,7 @@ jobs:
           curl -fsSL -o /usr/local/bin/yq \
             "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_${OS}_${ARCH}"
           chmod +x /usr/local/bin/yq
+
       - name: Update appVersion for ALL charts + write releaseTag
         shell: bash
         run: |
@@ -129,6 +148,7 @@ jobs:
             yq -i '.appVersion = env(TAG)' "$f"
           done
           yq -i '.global.releaseTag = env(TAG)' infra/helm/argocd-apps/values.yaml
+
       - name: Commit & push change
         run: |
           set -euo pipefail
@@ -143,20 +163,30 @@ jobs:
           fi
 
   create-tag:
-    name: Create & push git tag
+    name: Create & push git tag (main only; no-op on tag runs)
     runs-on: ubuntu-latest
     needs: [compute-tag, bump-helm-appversion]
-    if: ${{ github.ref_type == 'branch' && github.ref_name == 'main' }}
     env:
       TAG: ${{ needs.compute-tag.outputs.tag }}
     steps:
+      - name: Skip unless main branch push
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ github.ref_type }}" != "branch" || "${{ github.ref_name }}" != "main" ]]; then
+            echo "Not a main branch push; skipping tag create."
+            exit 0
+          fi
+
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - name: Configure git identity
         run: |
           git config user.name  "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
+
       - name: Tag & push
         shell: bash
         run: |
@@ -177,18 +207,22 @@ jobs:
     needs: [resolve-runner, setup]
     steps:
       - uses: actions/checkout@v4
+
       - name: Configure AWS credentials (OIDC role)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
+
       - uses: docker/setup-buildx-action@v3
+
       - name: Login to Amazon ECR
         shell: bash
         run: |
           set -euo pipefail
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
+
       - name: Build & push app to ECR
         uses: docker/build-push-action@v6
         with:
@@ -205,18 +239,22 @@ jobs:
     needs: [resolve-runner, setup]
     steps:
       - uses: actions/checkout@v4
+
       - name: Configure AWS credentials (OIDC role)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ vars.AWS_REGION }}
+
       - uses: docker/setup-buildx-action@v3
+
       - name: Login to Amazon ECR
         shell: bash
         run: |
           set -euo pipefail
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
+
       - name: Build & push web to ECR
         uses: docker/build-push-action@v6
         with:
@@ -260,6 +298,32 @@ jobs:
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
 
+      - name: Ensure Docker Compose v2 (no sudo; install in $HOME if missing)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if docker compose version >/dev/null 2>&1; then
+            docker compose version
+            exit 0
+          fi
+
+          mkdir -p "$HOME/.docker/cli-plugins"
+
+          ARCH="$(uname -m)"
+          case "$ARCH" in
+            x86_64|amd64) BIN="docker-compose-linux-x86_64" ;;
+            aarch64|arm64) BIN="docker-compose-linux-aarch64" ;;
+            *) echo "Unsupported arch: $ARCH"; exit 1 ;;
+          esac
+
+          VER="v2.27.0"
+          curl -fsSL "https://github.com/docker/compose/releases/download/${VER}/${BIN}" \
+            -o "$HOME/.docker/cli-plugins/docker-compose"
+          chmod +x "$HOME/.docker/cli-plugins/docker-compose"
+
+          docker compose version
+
       - name: Pick compose command (docker compose or docker-compose)
         id: compose
         shell: bash
@@ -271,7 +335,6 @@ jobs:
             echo "cmd=docker-compose" >> "$GITHUB_OUTPUT"
           else
             echo "Neither 'docker compose' nor 'docker-compose' is installed on this runner."
-            echo "Install compose plugin or docker-compose."
             exit 1
           fi
           echo "Using: $(cat $GITHUB_OUTPUT | grep '^cmd=' | cut -d= -f2-)"
@@ -310,7 +373,7 @@ jobs:
           mkdir -p "$BASE_DIR"
           cp -f deploy/compose.yml "$BASE_DIR/compose.yml"
 
-      - name: Deploy with compose (no --env-file, uses .env automatically)
+      - name: Deploy with compose (uses .env automatically)
         shell: bash
         run: |
           set -euo pipefail
@@ -331,9 +394,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          COMPOSE="${{ steps.compose.outputs.cmd }}"
           APIP="${FLASK_PORT:-8000}"
           WEBP="${WEB_PORT:-8082}"
-          curl -sf "http://127.0.0.1:${APIP}/health" || (docker logs app || true; exit 1)
+
+          curl -sf "http://127.0.0.1:${APIP}/health" || ($COMPOSE -f "$HOME/supermario/compose.yml" logs --no-color --tail=200 app || true; exit 1)
           curl -sI "http://127.0.0.1:${WEBP}" | grep -q "200 OK"
 
   notify-slack:
