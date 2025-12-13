@@ -9,14 +9,9 @@ on:
   workflow_dispatch:
     inputs:
       runner:
-        description: "Where to run the workflow jobs"
+        description: "Where to run jobs (ec2=self-hosted runner, github=github-hosted)"
         type: choice
-        options: [github, ec2]
-        default: ec2
-      deploy_target:
-        description: "Deploy target (for this assignment we deploy on EC2 docker-compose)"
-        type: choice
-        options: [ec2]
+        options: [ ec2, github ]
         default: ec2
 
 permissions:
@@ -35,56 +30,50 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  # ------------------------------------------------------------
-  # Resolve runner + deploy target (inputs > vars > defaults)
-  # ------------------------------------------------------------
-  resolve:
-    name: Resolve runner & deploy target
+  resolve-runner:
+    name: Resolve runner (self-hosted vs github-hosted)
     runs-on: ubuntu-latest
     outputs:
-      runner: ${{ steps.out.outputs.runner }}
-      deploy_target: ${{ steps.out.outputs.deploy_target }}
+      runs_on: ${{ steps.out.outputs.runs_on }}
+      self_hosted: ${{ steps.out.outputs.self_hosted }}
     steps:
       - id: out
         shell: bash
         run: |
           set -euo pipefail
+          in="${{ inputs.runner }}"
+          var="${{ vars.RUNNER_TARGET }}"
+          choice="${in:-${var:-ec2}}"
 
-          in_runner="${{ inputs.runner }}"
-          var_runner="${{ vars.RELEASE_RUNNER }}"
-          runner="${in_runner:-${var_runner:-ec2}}"
+          if [[ "$choice" == "ec2" ]]; then
+            echo 'runs_on=["self-hosted","ec2"]' >> "$GITHUB_OUTPUT"
+            echo 'self_hosted=true' >> "$GITHUB_OUTPUT"
+            echo "Runner resolved to: self-hosted/ec2"
+          else
+            echo 'runs_on=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+            echo 'self_hosted=false' >> "$GITHUB_OUTPUT"
+            echo "Runner resolved to: github-hosted ubuntu-latest"
+          fi
 
-          in_target="${{ inputs.deploy_target }}"
-          var_target="${{ vars.DEPLOY_TARGET }}"
-          deploy_target="${in_target:-${var_target:-ec2}}"
-
-          echo "runner=$runner" >> "$GITHUB_OUTPUT"
-          echo "deploy_target=$deploy_target" >> "$GITHUB_OUTPUT"
-
-          echo "Resolved runner=$runner"
-          echo "Resolved deploy_target=$deploy_target"
-
-  # ------------------------------------------------------------
-  # Compute next tag on main branch pushes (if not pushing a tag)
-  # ------------------------------------------------------------
   compute-tag:
     name: Compute next tag (when pushing to main)
-    runs-on: ubuntu-latest
+    needs: [resolve-runner]
+    runs-on: ${{ fromJSON(needs.resolve-runner.outputs.runs_on) }}
     if: ${{ github.ref_type == 'branch' && github.ref_name == 'main' }}
     outputs:
       tag: ${{ steps.bump.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
 
-      - name: Compute next semver tag (patch bump)
+      - name: Compute next tag (no create)
         id: bump
         shell: bash
         run: |
           set -euo pipefail
           git fetch --tags --force
-
-          last="$(git tag -l 'v*.*.*' | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -n1 || true)"
+          last="$(git tag -l 'v*.*.*' | sort -V | tail -n1 || true)"
           if [[ -z "$last" ]]; then
             major=1 minor=0 patch=1
           else
@@ -92,17 +81,12 @@ jobs:
             major="$vM"; minor="$vN"; patch="$vP"
             patch=$((10#$patch + 1))
           fi
-
           echo "tag=v${major}.${minor}.${patch}" >> "$GITHUB_OUTPUT"
-          echo "Next tag: v${major}.${minor}.${patch}"
 
-  # ------------------------------------------------------------
-  # Resolve IMAGE_TAG: pushed tag or computed tag
-  # ------------------------------------------------------------
   setup:
     name: Resolve image tag
-    runs-on: ubuntu-latest
-    needs: [compute-tag]
+    needs: [resolve-runner, compute-tag]
+    runs-on: ${{ fromJSON(needs.resolve-runner.outputs.runs_on) }}
     outputs:
       IMAGE_TAG: ${{ steps.resolve.outputs.IMAGE_TAG }}
     steps:
@@ -112,29 +96,79 @@ jobs:
           set -euo pipefail
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
             echo "IMAGE_TAG=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
-            echo "Using pushed tag: ${{ github.ref_name }}"
           else
             echo "IMAGE_TAG=${{ needs.compute-tag.outputs.tag }}" >> "$GITHUB_OUTPUT"
-            echo "Using computed tag: ${{ needs.compute-tag.outputs.tag }}"
           fi
 
-  # ------------------------------------------------------------
-  # Optional: Create tag on main pushes (branch builds)
-  # ------------------------------------------------------------
-  create-tag:
-    name: Create & push git tag (main pushes)
-    runs-on: ubuntu-latest
-    needs: [compute-tag]
+  bump-helm-appversion:
+    name: Bump Helm appVersion in all charts & push
+    needs: [resolve-runner, compute-tag]
+    runs-on: ${{ fromJSON(needs.resolve-runner.outputs.runs_on) }}
     if: ${{ github.ref_type == 'branch' && github.ref_name == 'main' }}
     env:
       TAG: ${{ needs.compute-tag.outputs.tag }}
     steps:
       - uses: actions/checkout@v4
-        with: { fetch-depth: 0 }
+        with:
+          fetch-depth: 0
+
+      - name: Install yq (static)
+        shell: bash
+        run: |
+          set -euo pipefail
+          YQ_VERSION=v4.44.3
+          OS=$(uname); ARCH=$(uname -m)
+          case "$ARCH" in
+            x86_64) ARCH=amd64 ;;
+            aarch64|arm64) ARCH=arm64 ;;
+          esac
+          curl -fsSL -o /usr/local/bin/yq \
+            "https://github.com/mikefarah/yq/releases/download/${YQ_VERSION}/yq_${OS}_${ARCH}"
+          chmod +x /usr/local/bin/yq
+
+      - name: Update appVersion for ALL charts + write releaseTag
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -t charts < <(git ls-files 'infra/helm/**/Chart.yaml')
+          (( ${#charts[@]} )) || { echo "No Chart.yaml under infra/helm"; exit 1; }
+          for f in "${charts[@]}"; do
+            yq -i '.appVersion = env(TAG)' "$f"
+          done
+          yq -i '.global.releaseTag = env(TAG)' infra/helm/argocd-apps/values.yaml
+
+      - name: Commit & push change
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions"
+          git config user.email "github-actions@users.noreply.github.com"
+          if git diff --quiet; then
+            echo "No changes to commit."
+          else
+            git add infra/helm/**/Chart.yaml infra/helm/argocd-apps/values.yaml
+            git commit -m "chore(helm): set appVersion & releaseTag ${TAG}"
+            git push origin HEAD:main
+          fi
+
+  create-tag:
+    name: Create & push git tag
+    needs: [resolve-runner, compute-tag, bump-helm-appversion]
+    runs-on: ${{ fromJSON(needs.resolve-runner.outputs.runs_on) }}
+    if: ${{ github.ref_type == 'branch' && github.ref_name == 'main' }}
+    env:
+      TAG: ${{ needs.compute-tag.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Configure git identity
+        shell: bash
         run: |
           git config user.name  "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
+
       - name: Tag & push
         shell: bash
         run: |
@@ -143,40 +177,33 @@ jobs:
           git checkout main
           git pull --ff-only
           if git rev-parse "$TAG" >/dev/null 2>&1; then
-            echo "Tag $TAG already exists; skipping."
+            echo "Tag $TAG already exists; skipping create."
           else
             git tag -a "$TAG" -m "Release $TAG"
             git push origin "$TAG"
           fi
 
-  # ------------------------------------------------------------
-  # Build & push APP image (ECR)
-  # Runner selectable: GitHub-hosted or EC2 self-hosted
-  # ------------------------------------------------------------
   build-and-push-app:
     name: Build & push app image (ECR)
-    needs: [resolve, setup]
-    runs-on: ${{ needs.resolve.outputs.runner == 'ec2' && fromJSON('["self-hosted","ec2"]') || 'ubuntu-latest' }}
+    needs: [resolve-runner, setup]
+    runs-on: ${{ fromJSON(needs.resolve-runner.outputs.runs_on) }}
     env:
       IMAGE_TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Show runner evidence (for assignment)
+      - name: Docker info (self-hosted sanity)
         shell: bash
         run: |
-          echo "RUNNER_NAME=$RUNNER_NAME"
-          echo "RUNNER_OS=$RUNNER_OS"
-          echo "RUNNER_ARCH=$RUNNER_ARCH"
-          echo "RUNNER_LABELS=$RUNNER_LABELS"
-          uname -a || true
-          curl -s http://169.254.169.254/latest/meta-data/instance-id || true
+          docker --version
+          docker compose version || true
+          docker buildx version || true
 
       - name: Configure AWS credentials (OIDC role)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -185,6 +212,22 @@ jobs:
         run: |
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
+
+      - name: Decide build cache strategy (avoid gha-cache on self-hosted)
+        id: cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ needs.resolve-runner.outputs.self_hosted }}" == "true" ]]; then
+            mkdir -p /tmp/.buildx-cache
+            echo "cache_from=type=local,src=/tmp/.buildx-cache" >> "$GITHUB_OUTPUT"
+            echo "cache_to=type=local,dest=/tmp/.buildx-cache-new,mode=max" >> "$GITHUB_OUTPUT"
+            echo "Using LOCAL cache (self-hosted)"
+          else
+            echo "cache_from=type=gha" >> "$GITHUB_OUTPUT"
+            echo "cache_to=type=gha,mode=max" >> "$GITHUB_OUTPUT"
+            echo "Using GHA cache (github-hosted)"
+          fi
 
       - name: Build & push app to ECR
         uses: docker/build-push-action@v6
@@ -193,39 +236,39 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.AWS_ECR_REGISTRY }}/${{ env.AWS_ECR_REPO_APP }}:${{ env.IMAGE_TAG }}
-            ${{ env.AWS_ECR_REGISTRY }}/${{ env.AWS_ECR_REPO_APP }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_APP }}:${{ needs.setup.outputs.IMAGE_TAG }}
+            ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_APP }}:latest
+          cache-from: ${{ steps.cache.outputs.cache_from }}
+          cache-to: ${{ steps.cache.outputs.cache_to }}
 
-  # ------------------------------------------------------------
-  # Build & push WEB image (ECR)
-  # Runner selectable: GitHub-hosted or EC2 self-hosted
-  # ------------------------------------------------------------
+      - name: Finalize local cache (self-hosted only)
+        if: ${{ needs.resolve-runner.outputs.self_hosted == 'true' }}
+        shell: bash
+        run: |
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
   build-and-push-web:
     name: Build & push web image (ECR)
-    needs: [resolve, setup]
-    runs-on: ${{ needs.resolve.outputs.runner == 'ec2' && fromJSON('["self-hosted","ec2"]') || 'ubuntu-latest' }}
+    needs: [resolve-runner, setup]
+    runs-on: ${{ fromJSON(needs.resolve-runner.outputs.runs_on) }}
     env:
       IMAGE_TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Show runner evidence (for assignment)
+      - name: Docker info (self-hosted sanity)
         shell: bash
         run: |
-          echo "RUNNER_NAME=$RUNNER_NAME"
-          echo "RUNNER_OS=$RUNNER_OS"
-          echo "RUNNER_ARCH=$RUNNER_ARCH"
-          echo "RUNNER_LABELS=$RUNNER_LABELS"
-          uname -a || true
-          curl -s http://169.254.169.254/latest/meta-data/instance-id || true
+          docker --version
+          docker compose version || true
+          docker buildx version || true
 
       - name: Configure AWS credentials (OIDC role)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - uses: docker/setup-buildx-action@v3
 
@@ -235,6 +278,22 @@ jobs:
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
 
+      - name: Decide build cache strategy (avoid gha-cache on self-hosted)
+        id: cache
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ "${{ needs.resolve-runner.outputs.self_hosted }}" == "true" ]]; then
+            mkdir -p /tmp/.buildx-cache
+            echo "cache_from=type=local,src=/tmp/.buildx-cache" >> "$GITHUB_OUTPUT"
+            echo "cache_to=type=local,dest=/tmp/.buildx-cache-new,mode=max" >> "$GITHUB_OUTPUT"
+            echo "Using LOCAL cache (self-hosted)"
+          else
+            echo "cache_from=type=gha" >> "$GITHUB_OUTPUT"
+            echo "cache_to=type=gha,mode=max" >> "$GITHUB_OUTPUT"
+            echo "Using GHA cache (github-hosted)"
+          fi
+
       - name: Build & push web to ECR
         uses: docker/build-push-action@v6
         with:
@@ -242,39 +301,43 @@ jobs:
           platforms: linux/amd64
           push: true
           tags: |
-            ${{ env.AWS_ECR_REGISTRY }}/${{ env.AWS_ECR_REPO_WEB }}:${{ env.IMAGE_TAG }}
-            ${{ env.AWS_ECR_REGISTRY }}/${{ env.AWS_ECR_REPO_WEB }}:latest
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+            ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_WEB }}:${{ needs.setup.outputs.IMAGE_TAG }}
+            ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_WEB }}:latest
+          cache-from: ${{ steps.cache.outputs.cache_from }}
+          cache-to: ${{ steps.cache.outputs.cache_to }}
 
-  # ------------------------------------------------------------
-  # Deploy on EC2 with Docker Compose (must run on EC2 runner)
-  # ------------------------------------------------------------
-  deploy-ec2:
-    name: Deploy to EC2 (Docker Compose from ECR)
-    needs: [resolve, setup, build-and-push-app, build-and-push-web, create-tag]
-    runs-on: [self-hosted, ec2]
-    if: ${{ needs.resolve.outputs.deploy_target == 'ec2' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
-    env:
-      TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
-      APP_IMAGE: ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_APP }}
-      WEB_IMAGE: ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_WEB }}
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Show runner evidence (for assignment)
+      - name: Finalize local cache (self-hosted only)
+        if: ${{ needs.resolve-runner.outputs.self_hosted == 'true' }}
         shell: bash
         run: |
-          echo "RUNNER_NAME=$RUNNER_NAME"
-          echo "RUNNER_LABELS=$RUNNER_LABELS"
-          echo "Instance ID (should work on EC2):"
-          curl -s http://169.254.169.254/latest/meta-data/instance-id || true
+          rm -rf /tmp/.buildx-cache
+          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+
+  deploy-ec2:
+    name: Deploy to EC2 (Docker Compose from ECR) — MUST be self-hosted
+    needs: [resolve-runner, setup, build-and-push-app, build-and-push-web, create-tag]
+    runs-on: ${{ fromJSON(needs.resolve-runner.outputs.runs_on) }}
+    if: ${{ needs.resolve-runner.outputs.self_hosted == 'true' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
+    env:
+      TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_ECR_REGISTRY: ${{ vars.AWS_ECR_REGISTRY }}
+      APP_IMAGE: ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_APP }}
+      WEB_IMAGE: ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_WEB }}
+      DB_NAME: ${{ vars.DB_NAME }}
+      DB_USER: ${{ vars.DB_USER }}
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      DB_PORT: ${{ vars.DB_PORT || '5432' }}
+      FLASK_PORT: ${{ vars.FLASK_PORT || '8000' }}
+      WEB_PORT: ${{ vars.WEB_PORT || '8082' }}
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Configure AWS credentials (OIDC role)
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - name: Login to ECR
         shell: bash
@@ -282,34 +345,36 @@ jobs:
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
 
-      - name: Prepare /srv/supermario (env + compose)
+      - name: Prepare /srv/supermario (.env + compose.yml)
         shell: bash
         run: |
           set -euo pipefail
           sudo mkdir -p /srv/supermario
-          sudo chown -R "$(id -u):$(id -g)" /srv/supermario
-
-          cp -f deploy/compose.yml /srv/supermario/compose.yml
+          sudo chown -R "$(id -u)":"$(id -g)" /srv/supermario
 
           cat > /srv/supermario/.env <<EOF
-          APP_IMAGE=${APP_IMAGE}
-          WEB_IMAGE=${WEB_IMAGE}
-          TAG=${TAG}
-          DB_NAME=${{ vars.DB_NAME }}
-          DB_USER=${{ vars.DB_USER }}
-          DB_PASSWORD=${{ secrets.DB_PASSWORD }}
-          DB_PORT=${{ vars.DB_PORT || '5432' }}
-          FLASK_PORT=${{ vars.FLASK_PORT || '8000' }}
-          WEB_PORT=${{ vars.WEB_PORT || '8082' }}
-          EOF
+APP_IMAGE=${APP_IMAGE}
+WEB_IMAGE=${WEB_IMAGE}
+TAG=${TAG}
+DB_NAME=${DB_NAME}
+DB_USER=${DB_USER}
+DB_PASSWORD=${DB_PASSWORD}
+DB_PORT=${DB_PORT}
+FLASK_PORT=${FLASK_PORT}
+WEB_PORT=${WEB_PORT}
+EOF
 
-          echo "Wrote /srv/supermario/.env"
+          cp -f deploy/compose.yml /srv/supermario/compose.yml
+          echo "Wrote /srv/supermario/.env and /srv/supermario/compose.yml"
 
-      - name: Deploy with docker compose (pull from ECR)
+      - name: Deploy with Docker Compose
         shell: bash
         run: |
           set -euo pipefail
           cd /srv/supermario
+
+          docker --version
+          docker compose version
 
           docker pull "${APP_IMAGE}:${TAG}"
           docker pull "${WEB_IMAGE}:${TAG}"
@@ -323,21 +388,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          FLASK_PORT="${{ vars.FLASK_PORT || '8000' }}"
-          WEB_PORT="${{ vars.WEB_PORT || '8082' }}"
-
+          echo "Testing API health on port ${FLASK_PORT}"
           curl -sf "http://127.0.0.1:${FLASK_PORT}/health" || (docker logs app || true; exit 1)
-          curl -sI "http://127.0.0.1:${WEB_PORT}" | grep -q "200 OK"
-          echo "Smoke tests OK."
 
-  # ------------------------------------------------------------
-  # Slack notification (always)
-  # ------------------------------------------------------------
+          echo "Testing WEB on port ${WEB_PORT}"
+          curl -sI "http://127.0.0.1:${WEB_PORT}" | grep -q "200 OK"
+
   notify-slack:
     name: notify-slack / send
     if: ${{ always() }}
     needs:
-      - resolve
       - setup
       - build-and-push-app
       - build-and-push-web
@@ -347,6 +407,6 @@ jobs:
     with:
       title: "Release_AWS: ${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
       status: ${{ (needs['build-and-push-app'].result == 'failure' || needs['build-and-push-web'].result == 'failure' || needs['deploy-ec2'].result == 'failure') && 'failure' || 'success' }}
-      message: "runner=${{ needs.resolve.outputs.runner }} · target=${{ needs.resolve.outputs.deploy_target }} · tag=${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
+      message: "runner=${{ inputs.runner || vars.RUNNER_TARGET || 'ec2' }} · tag=${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
       only_on: "always"
       run_url: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
