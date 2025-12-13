@@ -28,7 +28,7 @@ services:
   web:
     image: ${IMAGE_REPO_WEB}:${TAG}
     ports:
-      - "80:80"
+      - "${WEB_PORT:-80}:80"
     depends_on:
       app:
         condition: service_healthy
