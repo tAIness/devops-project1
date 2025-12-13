@@ -103,9 +103,11 @@ jobs:
         run: |
           set -euo pipefail
           tag="${{ needs.compute-tag.outputs.tag }}"
+
           if [[ -z "${tag}" ]]; then
             tag="${{ github.ref_name }}"
           fi
+
           echo "IMAGE_TAG=${tag}" >> "$GITHUB_OUTPUT"
           echo "SLACK_TAG=${tag}" >> "$GITHUB_OUTPUT"
 
@@ -141,9 +143,11 @@ jobs:
           set -euo pipefail
           mapfile -t charts < <(git ls-files 'infra/helm/**/Chart.yaml')
           (( ${#charts[@]} )) || { echo "No Chart.yaml under infra/helm"; exit 1; }
+
           for f in "${charts[@]}"; do
             yq -i '.appVersion = env(TAG)' "$f"
           done
+
           yq -i '.global.releaseTag = env(TAG)' infra/helm/argocd-apps/values.yaml
 
       - name: Commit & push change
@@ -152,6 +156,7 @@ jobs:
           set -euo pipefail
           git config user.name  "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
+
           if git diff --quiet; then
             echo "No changes to commit."
           else
@@ -185,6 +190,7 @@ jobs:
           git fetch --all --tags
           git checkout main
           git pull --ff-only
+
           if git rev-parse "$TAG" >/dev/null 2>&1; then
             echo "Tag $TAG already exists; skipping create."
           else
@@ -256,10 +262,106 @@ jobs:
             ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_WEB }}:${{ needs.setup.outputs.IMAGE_TAG }}
             ${{ vars.AWS_ECR_REGISTRY }}/${{ vars.AWS_ECR_REPO_WEB }}:latest
 
+  snyk-release:
+    name: Snyk scan of ECR images
+    runs-on: ubuntu-latest
+    needs: [setup, build-and-push-app, build-and-push-web]
+    env:
+      IMAGE_TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+      AWS_REGION: ${{ vars.AWS_REGION }}
+      AWS_ECR_REGISTRY: ${{ vars.AWS_ECR_REGISTRY }}
+      AWS_ECR_REPO_APP: ${{ vars.AWS_ECR_REPO_APP }}
+      AWS_ECR_REPO_WEB: ${{ vars.AWS_ECR_REPO_WEB }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials (OIDC role)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          aws-region: ${{ vars.AWS_REGION }}
+
+      - name: Login to Amazon ECR
+        shell: bash
+        run: |
+          set -euo pipefail
+          aws ecr get-login-password --region "${AWS_REGION}" \
+            | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
+
+      - name: Pull images to local docker
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP_IMG="${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_APP}:${IMAGE_TAG}"
+          WEB_IMG="${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_WEB}:${IMAGE_TAG}"
+          docker pull "$APP_IMG"
+          docker pull "$WEB_IMG"
+
+      - uses: snyk/actions/setup@0.4.0
+
+      - name: Snyk auth
+        shell: bash
+        run: snyk auth "$SNYK_TOKEN"
+
+      - name: Build .snyk from ignore list (if present)
+        shell: bash
+        run: |
+          set -euo pipefail
+          touch .snyk
+          if [[ -f "security/ignores.txt" ]]; then
+            grep -v '^\s*#' security/ignores.txt | sed '/^\s*$/d' | while read -r ID; do
+              snyk ignore --id="$ID" --reason="approved via repo ignore list" --expiry=2099-12-31 --yes --quiet || true
+            done
+          fi
+
+      - name: Scan & save JSON
+        id: scan
+        shell: bash
+        run: |
+          set +e
+          set -u -o pipefail
+
+          APP_IMG="${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_APP}:${IMAGE_TAG}"
+          WEB_IMG="${AWS_ECR_REGISTRY}/${AWS_ECR_REPO_WEB}:${IMAGE_TAG}"
+
+          printf "%s\n%s\n" "$APP_IMG" "$WEB_IMG" > images.txt
+
+          failures=0
+          while read -r IMG; do
+            [[ -z "$IMG" ]] && continue
+            SAFE="$(echo "$IMG" | tr '/:@' '___')"
+            OUT="snyk-${SAFE}.json"
+
+            snyk container test "$IMG" --severity-threshold=high --json-file-output="$OUT"
+            rc=$?
+
+            if [ ! -s "$OUT" ]; then
+              snyk container test "$IMG" --severity-threshold=high --json > "$OUT" 2>/dev/null || echo '{"note":"no json"}' > "$OUT"
+            fi
+
+            if [ $rc -ne 0 ]; then failures=$((failures+1)); fi
+          done < images.txt
+
+          echo "failures=$failures" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: snyk-reports
+          path: snyk-*.json
+          if-no-files-found: warn
+
+      - name: Fail if any image failed
+        if: ${{ steps.scan.outputs.failures != '0' }}
+        run: |
+          echo "Blocking release: Snyk found issues above threshold."
+          exit 1
+
   deploy-ec2:
     name: Deploy to EC2 (Docker Compose from ECR) - SELF HOSTED
     runs-on: [self-hosted, ec2]
-    needs: [setup, build-and-push-app, build-and-push-web]
+    needs: [setup, build-and-push-app, build-and-push-web, snyk-release]
     if: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && (github.event_name != 'workflow_dispatch' || inputs.deploy) }}
 
     concurrency:
@@ -418,12 +520,13 @@ jobs:
       - setup
       - build-and-push-app
       - build-and-push-web
+      - snyk-release
       - deploy-ec2
     uses: tAIness/devops-ci-lib/.github/workflows/slack-notify.yml@main
     secrets: inherit
     with:
       title: Release_AWS
-      status: ${{ (needs.build-and-push-app.result == 'failure' || needs.build-and-push-web.result == 'failure' || needs.deploy-ec2.result == 'failure') && 'failure' || 'success' }}
+      status: ${{ (needs.build-and-push-app.result == 'failure' || needs.build-and-push-web.result == 'failure' || needs.snyk-release.result == 'failure' || needs.deploy-ec2.result == 'failure') && 'failure' || 'success' }}
       message: deploy=ec2 tag=${{ needs.setup.outputs.SLACK_TAG }}
       only_on: always
       run_url: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}
