@@ -8,11 +8,15 @@ on:
     tags: ['v*.*.*']
   workflow_dispatch:
     inputs:
-      target:
-        description: "Deploy target (ec2=docker compose on EC2 self-hosted runner)"
+      build_runner:
+        description: "Where to run the build jobs"
         type: choice
-        options: [ ec2 ]
-        default: ec2
+        options: [ github, ec2 ]
+        default: github
+      deploy:
+        description: "Run deploy step"
+        type: boolean
+        default: true
 
 permissions:
   contents: write
@@ -30,20 +34,27 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  resolve-target:
-    name: Resolve deploy target
+  resolve-runner:
+    name: Resolve runner (github/ec2)
     runs-on: ubuntu-latest
     outputs:
-      target: ${{ steps.out.outputs.target }}
+      build_runs_on: ${{ steps.out.outputs.build_runs_on }}
     steps:
       - id: out
         shell: bash
         run: |
-          in="${{ inputs.target }}"
-          var="${{ vars.DEPLOY_TARGET }}"
-          tgt="${in:-${var:-ec2}}"
-          echo "target=$tgt" >> "$GITHUB_OUTPUT"
-          echo "Deploy target resolved to: $tgt"
+          set -euo pipefail
+          # On push there is no inputs.*; default to "github"
+          req="${{ inputs.build_runner }}"
+          req="${req:-github}"
+
+          if [[ "$req" == "ec2" ]]; then
+            echo 'build_runs_on=["self-hosted","ec2"]' >> "$GITHUB_OUTPUT"
+          else
+            echo 'build_runs_on=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+          fi
+
+          echo "Build runs-on: $(cat $GITHUB_OUTPUT | grep build_runs_on | cut -d= -f2-)"
 
   compute-tag:
     name: Compute next tag (when pushing to main)
@@ -171,10 +182,8 @@ jobs:
 
   build-and-push-app:
     name: Build & push app image (ECR)
-    runs-on: ubuntu-latest
-    needs: [setup]
-    env:
-      IMAGE_TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
+    runs-on: ${{ fromJSON(needs.resolve-runner.outputs.build_runs_on) }}
+    needs: [resolve-runner, setup]
     steps:
       - uses: actions/checkout@v4
 
@@ -182,12 +191,14 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - uses: docker/setup-buildx-action@v3
 
       - name: Login to Amazon ECR
+        shell: bash
         run: |
+          set -euo pipefail
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
 
@@ -197,7 +208,7 @@ jobs:
           context: ./app
           platforms: linux/amd64
           push: true
-          # IMPORTANT: disable GHA cache to avoid "Our services aren't available right now" failures
+          # Disable GHA cache (avoids "Our services aren't available right now" failures)
           # cache-from: type=gha
           # cache-to: type=gha,mode=max
           tags: |
@@ -206,10 +217,8 @@ jobs:
 
   build-and-push-web:
     name: Build & push web image (ECR)
-    runs-on: ubuntu-latest
-    needs: [setup]
-    env:
-      IMAGE_TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
+    runs-on: ${{ fromJSON(needs.resolve-runner.outputs.build_runs_on) }}
+    needs: [resolve-runner, setup]
     steps:
       - uses: actions/checkout@v4
 
@@ -217,12 +226,14 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ vars.AWS_REGION }}
 
       - uses: docker/setup-buildx-action@v3
 
       - name: Login to Amazon ECR
+        shell: bash
         run: |
+          set -euo pipefail
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
 
@@ -232,7 +243,7 @@ jobs:
           context: ./web
           platforms: linux/amd64
           push: true
-          # IMPORTANT: disable GHA cache to avoid "Our services aren't available right now" failures
+          # Disable GHA cache (avoids "Our services aren't available right now" failures)
           # cache-from: type=gha
           # cache-to: type=gha,mode=max
           tags: |
@@ -242,8 +253,8 @@ jobs:
   deploy-ec2:
     name: Deploy to EC2 (Docker Compose from ECR) - SELF HOSTED
     runs-on: [self-hosted, ec2]
-    needs: [resolve-target, setup, build-and-push-app, build-and-push-web, create-tag]
-    if: ${{ needs.resolve-target.outputs.target == 'ec2' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) }}
+    needs: [setup, build-and-push-app, build-and-push-web, create-tag]
+    if: ${{ (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')) && (github.event_name != 'workflow_dispatch' || inputs.deploy == true) }}
     env:
       TAG: ${{ needs.setup.outputs.IMAGE_TAG }}
       AWS_REGION: ${{ vars.AWS_REGION }}
@@ -272,16 +283,14 @@ jobs:
           aws ecr get-login-password --region "${AWS_REGION}" \
             | docker login --username AWS --password-stdin "${AWS_ECR_REGISTRY}"
 
-      # ✅ Quick fix: write under $HOME (owned by ghrunner) and NO sudo
+      # IMPORTANT: no /srv and no sudo (prevents sudo password prompt)
       - name: Write .env for compose (no sudo)
         shell: bash
         run: |
           set -euo pipefail
-
           BASE_DIR="$HOME/supermario"
           mkdir -p "$BASE_DIR"
 
-          # Default ports if repo vars are empty
           DBP="${DB_PORT:-5432}"
           APIP="${FLASK_PORT:-8000}"
           WEBP="${WEB_PORT:-8082}"
@@ -320,8 +329,8 @@ jobs:
           docker pull "${WEB_IMAGE}:${TAG}"
 
           docker volume create supermario_db_data >/dev/null 2>&1 || true
-
           docker compose --env-file .env -f compose.yml up -d --no-build
+
           docker ps --format 'table {{.Names}}\t{{.Status}}\t{{.Ports}}'
 
       - name: Smoke test
@@ -346,6 +355,6 @@ jobs:
     with:
       title: "Release_AWS: ${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
       status: ${{ (needs['build-and-push-app'].result == 'failure' || needs['build-and-push-web'].result == 'failure' || needs['deploy-ec2'].result == 'failure') && 'failure' || 'success' }}
-      message: "target=ec2 · tag=${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
+      message: "deploy=ec2 · tag=${{ needs.setup.outputs.IMAGE_TAG || github.ref_name }}"
       only_on: "always"
       run_url: "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
