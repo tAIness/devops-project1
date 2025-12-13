@@ -70,7 +70,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          # If workflow triggered by a tag push - use that tag as-is
+          # If triggered by tag push - use that tag as-is
           if [[ "${{ github.ref_type }}" == "tag" ]]; then
             echo "tag=${{ github.ref_name }}" >> "$GITHUB_OUTPUT"
             exit 0
@@ -103,12 +103,9 @@ jobs:
         run: |
           set -euo pipefail
           tag="${{ needs.compute-tag.outputs.tag }}"
-
-          # Fallback safety
           if [[ -z "${tag}" ]]; then
             tag="${{ github.ref_name }}"
           fi
-
           echo "IMAGE_TAG=${tag}" >> "$GITHUB_OUTPUT"
           echo "SLACK_TAG=${tag}" >> "$GITHUB_OUTPUT"
 
@@ -144,11 +141,9 @@ jobs:
           set -euo pipefail
           mapfile -t charts < <(git ls-files 'infra/helm/**/Chart.yaml')
           (( ${#charts[@]} )) || { echo "No Chart.yaml under infra/helm"; exit 1; }
-
           for f in "${charts[@]}"; do
             yq -i '.appVersion = env(TAG)' "$f"
           done
-
           yq -i '.global.releaseTag = env(TAG)' infra/helm/argocd-apps/values.yaml
 
       - name: Commit & push change
@@ -157,7 +152,6 @@ jobs:
           set -euo pipefail
           git config user.name  "github-actions"
           git config user.email "github-actions@users.noreply.github.com"
-
           if git diff --quiet; then
             echo "No changes to commit."
           else
@@ -191,7 +185,6 @@ jobs:
           git fetch --all --tags
           git checkout main
           git pull --ff-only
-
           if git rev-parse "$TAG" >/dev/null 2>&1; then
             echo "Tag $TAG already exists; skipping create."
           else
@@ -316,7 +309,7 @@ jobs:
             exit 1
           fi
 
-      - name: Write .env for compose (no heredoc to avoid YAML issues)
+      - name: Write .env for compose
         shell: bash
         run: |
           set -euo pipefail
@@ -392,7 +385,6 @@ jobs:
             echo "Attempt $i/25 failed; sleeping 2s..."
             sleep 2
           done
-
           if [[ "$ok" -ne 1 ]]; then
             echo "App health failed. Dumping logs:"
             $COMPOSE -f "$BASE_DIR/compose.yml" logs --no-color --tail=300 app || true
@@ -400,7 +392,7 @@ jobs:
             exit 1
           fi
 
-          echo "Waiting for web on http://127.0.0.1:${WEBP}/ ..."
+          echo "Waiting for web on http://127.0.0.1:${WEBP} ..."
           ok=0
           for i in {1..25}; do
             code="$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${WEBP}/" || true)"
@@ -411,7 +403,6 @@ jobs:
             echo "Attempt $i/25 got HTTP $code; sleeping 2s..."
             sleep 2
           done
-
           if [[ "$ok" -ne 1 ]]; then
             echo "Web check failed. Dumping logs:"
             $COMPOSE -f "$BASE_DIR/compose.yml" logs --no-color --tail=300 web || true
