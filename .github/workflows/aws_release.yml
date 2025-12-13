@@ -379,6 +379,7 @@ jobs:
           set -euo pipefail
           BASE_DIR="$HOME/supermario"
           APIP="${FLASK_PORT:-8000}"
+          WEBP="${WEB_PORT:-8082}"
           COMPOSE="${{ steps.compose.outputs.cmd }}"
 
           echo "Waiting for app health on http://127.0.0.1:${APIP}/health ..."
@@ -396,13 +397,14 @@ jobs:
             echo "App health failed. Dumping logs:"
             $COMPOSE -f "$BASE_DIR/compose.yml" logs --no-color --tail=300 app || true
             $COMPOSE -f "$BASE_DIR/compose.yml" logs --no-color --tail=300 db || true
+            docker ps --format 'table {{.Names}}\t{{.Ports}}\t{{.Status}}'
             exit 1
           fi
 
-          echo "Waiting for web on http://127.0.0.1:80 ..."
+          echo "Waiting for web on http://127.0.0.1:${WEBP} ..."
           ok=0
           for i in {1..25}; do
-            code="$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:80" || true)"
+            code="$(curl -s -o /dev/null -w "%{http_code}" "http://127.0.0.1:${WEBP}/" || true)"
             if [[ "$code" == "200" || "$code" == "301" || "$code" == "302" ]]; then
               ok=1
               break
@@ -414,6 +416,7 @@ jobs:
           if [[ "$ok" -ne 1 ]]; then
             echo "Web check failed. Dumping logs:"
             $COMPOSE -f "$BASE_DIR/compose.yml" logs --no-color --tail=300 web || true
+            docker ps --format 'table {{.Names}}\t{{.Ports}}\t{{.Status}}'
             exit 1
           fi
 
